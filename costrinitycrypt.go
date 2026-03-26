@@ -281,17 +281,17 @@ var (
 	colBg         = color.RGBA{R: 2, G: 2, B: 8, A: 255}
 	colFg         = color.RGBA{R: 200, G: 215, B: 235, A: 255}
 	colCyan       = color.RGBA{R: 0, G: 220, B: 255, A: 255}
-	colCyanDim    = color.RGBA{R: 0, G: 140, B: 200, A: 255}
+	colCyanDim    = color.RGBA{R: 0, G: 170, B: 220, A: 255}
 	colCyanDark   = color.RGBA{R: 0, G: 60, B: 90, A: 255}
-	colInputBg    = color.RGBA{R: 8, G: 8, B: 18, A: 255}
+	colInputBg    = color.RGBA{R: 10, G: 12, B: 24, A: 255}
 	colOverlay    = color.RGBA{R: 4, G: 4, B: 12, A: 255}
-	colSep        = color.RGBA{R: 0, G: 40, B: 60, A: 255}
-	colDisabled   = color.RGBA{R: 30, G: 35, B: 50, A: 255}
-	colPlaceholder = color.RGBA{R: 45, G: 55, B: 75, A: 255}
+	colSep        = color.RGBA{R: 0, G: 50, B: 75, A: 255}
+	colDisabled   = color.RGBA{R: 50, G: 60, B: 80, A: 255}
+	colPlaceholder = color.RGBA{R: 80, G: 95, B: 120, A: 255}
 	colSuccess    = color.RGBA{R: 0, G: 255, B: 180, A: 255}
-	colWarn       = color.RGBA{R: 255, G: 160, B: 0, A: 255}
-	colDimText    = color.RGBA{R: 70, G: 90, B: 120, A: 255}
-	colMidText    = color.RGBA{R: 90, G: 110, B: 145, A: 255}
+	colWarn       = color.RGBA{R: 255, G: 170, B: 30, A: 255}
+	colDimText    = color.RGBA{R: 120, G: 140, B: 170, A: 255}
+	colMidText    = color.RGBA{R: 140, G: 160, B: 190, A: 255}
 	colError      = color.RGBA{R: 255, G: 40, B: 60, A: 255}
 )
 
