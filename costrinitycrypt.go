@@ -64,6 +64,7 @@ import (
 	"io"
 	"io/fs"
 	"math/big"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -235,6 +236,25 @@ func isProUnlocked() bool {
 // requiresProLicense returns true if the mode needs a Pro license.
 func requiresProLicense(mode int) bool {
 	return mode == ModeParanoid || mode == ModeFortress
+}
+
+// logActivation appends activation details to ~/.costrinity/activations.log
+func logActivation(code, email string) {
+	dir := filepath.Join(os.Getenv("HOME"), ".costrinity")
+	if runtime.GOOS == "windows" {
+		if h, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(h, ".costrinity")
+		}
+	}
+	os.MkdirAll(dir, 0700)
+	logPath := filepath.Join(dir, "activations.log")
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	entry := fmt.Sprintf("[%s] code=%s email=%s\n", time.Now().UTC().Format(time.RFC3339), code, email)
+	f.WriteString(entry)
 }
 
 type argon2Params struct {
@@ -2324,12 +2344,17 @@ func main() {
 	compressCheck := widget.NewCheck("Compress before encryption", func(v bool) { compressEnabled = v })
 	compressCheck.Checked = true
 
-	// ── Activate Pro button + dialog ──
+	// ── Activate Pro button — opens website + shows code entry dialog ──
 	activateProBtn := widget.NewButton("Activate Pro", func() {
+		// Open the purchase/activation page in the user's browser
+		u, _ := url.Parse("https://costrinity.xyz/crypt")
+		_ = a.OpenURL(u)
+
+		// Show the activation dialog with code + email fields
 		codeEntry := widget.NewEntry()
-		codeEntry.SetPlaceHolder("Enter 32-character activation code")
+		codeEntry.SetPlaceHolder("Paste your 32-character activation code")
 		emailEntry := widget.NewEntry()
-		emailEntry.SetPlaceHolder("Email (optional)")
+		emailEntry.SetPlaceHolder("Email (optional — for license recovery)")
 		formItems := []*widget.FormItem{
 			widget.NewFormItem("Activation Code", codeEntry),
 			widget.NewFormItem("Email", emailEntry),
@@ -2339,27 +2364,30 @@ func main() {
 				return
 			}
 			code := strings.TrimSpace(codeEntry.Text)
+			email := strings.TrimSpace(emailEntry.Text)
 			if len(code) != 32 {
 				notifyStatus(statusLabel, "Invalid code: must be 32 hex characters")
 				return
 			}
 			if !validateActivationCode(code) {
-				notifyStatus(statusLabel, "Invalid activation code — checksum mismatch")
+				notifyStatus(statusLabel, "Invalid activation code")
 				return
 			}
 			li := &LicenseInfo{
 				Code:        code,
 				ActivatedAt: time.Now().UTC().Format(time.RFC3339),
-				Email:       strings.TrimSpace(emailEntry.Text),
+				Email:       email,
 			}
 			if err := saveLicense(li); err != nil {
 				notifyStatus(statusLabel, "Failed to save license: "+err.Error())
 				return
 			}
+			// Log activation to ~/.costrinity/activations.log
+			logActivation(code, email)
 			refreshLicenseUI()
 			notifyStatus(statusLabel, "Activated — Paranoid + FORTRESS modes unlocked")
 		}, w)
-		d.Resize(fyne.NewSize(480, 200))
+		d.Resize(fyne.NewSize(500, 220))
 		d.Show()
 	})
 
@@ -2428,8 +2456,6 @@ func main() {
 		neonSeparator(colSep),
 		container.NewGridWithColumns(2, encFileBtn, encFolderBtn),
 		layers,
-		neonSeparator(colSep),
-		container.NewHBox(layout.NewSpacer(), activateProBtn, layout.NewSpacer()),
 	))
 
 	// ════════ DECRYPT TAB ════════
@@ -2629,13 +2655,14 @@ func main() {
 		neonSeparator(colSep),
 	)
 
-	// Bottom section: progress + status + footer (fixed height)
+	// Bottom section: progress + status + footer with Activate Pro button (fixed height)
+	footerRow := container.NewHBox(footer, layout.NewSpacer(), activateProBtn)
 	bottomSection := container.NewVBox(
 		neonSeparator(colSep),
 		progress,
 		statusLine,
 		statusLabel,
-		footer,
+		footerRow,
 	)
 
 	// Border layout: top and bottom fixed, tabs expand to fill center
