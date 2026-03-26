@@ -2008,26 +2008,67 @@ func restoreFile(meta CryptMeta, fileData []byte, status *widget.Label) {
 func zipFolder(folderPath string) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	zw := zip.NewWriter(buf)
+	baseName := filepath.Base(folderPath)
+	fileCount := 0
 	err := filepath.WalkDir(folderPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, _ := filepath.Rel(folderPath, path)
-		f, err := zw.Create(rel)
 		if err != nil {
 			return err
 		}
-		src, err := os.ReadFile(path)
+		rel, relErr := filepath.Rel(folderPath, path)
+		if relErr != nil {
+			return relErr
+		}
+		// Use forward slashes for zip compatibility across OS
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		// Prefix with folder name so decrypt restores the original structure
+		entryName := baseName + "/" + rel
+
+		if d.IsDir() {
+			// Directories must end with "/" in zip format
+			_, err := zw.Create(entryName + "/")
+			return err
+		}
+
+		info, err := d.Info()
 		if err != nil {
 			return err
 		}
-		_, err = f.Write(src)
+
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = entryName
+		header.Method = zip.Deflate // compress inside zip for better ratio
+
+		writer, err := zw.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		// Stream file content instead of ReadFile (handles large files)
+		src, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		_, err = io.Copy(writer, src)
+		fileCount++
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("zip walk error: %w", err)
 	}
-	zw.Close()
+	if fileCount == 0 {
+		zw.Close()
+		return nil, fmt.Errorf("folder is empty — nothing to encrypt")
+	}
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("zip close error: %w", err)
+	}
 	return buf.Bytes(), nil
 }
 
