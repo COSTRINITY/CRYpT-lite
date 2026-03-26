@@ -2501,10 +2501,35 @@ func main() {
 		}, w)
 	})
 
-	encFolderBtn := widget.NewButton("Encrypt Folder", func() {
+	// ── Folder encryption with path entry (Fyne folder dialog UX is broken) ──
+	folderPathEntry := widget.NewEntry()
+	folderPathEntry.SetPlaceHolder("Paste folder path or click Browse…")
+
+	folderBrowseBtn := widget.NewButton("Browse…", func() {
+		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+			if err != nil || uri == nil {
+				return
+			}
+			folderPathEntry.SetText(uri.Path())
+		}, w)
+	})
+
+	encFolderGoBtn := widget.NewButton("Encrypt Folder", func() {
 		pw := pwEntry.Text
 		if pw == "" {
 			notifyStatus(statusLabel, "Error: password required")
+			return
+		}
+		folderPath := strings.TrimSpace(folderPathEntry.Text)
+		if folderPath == "" {
+			notifyStatus(statusLabel, "Error: select or paste a folder path first")
+			return
+		}
+		// Clean up path (remove surrounding quotes if pasted from Explorer)
+		folderPath = strings.Trim(folderPath, "\"' ")
+		info, err := os.Stat(folderPath)
+		if err != nil || !info.IsDir() {
+			notifyStatus(statusLabel, "Error: not a valid folder — "+folderPath)
 			return
 		}
 		mode := currentMode
@@ -2514,13 +2539,14 @@ func main() {
 		}
 		kf := keyFileData
 		comp := compressEnabled
-		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-			if err != nil || uri == nil {
-				return
-			}
-			go encryptPath(uri.Path(), pw, kf, mode, true, comp, progress, statusLabel)
-		}, w)
+		go encryptPath(folderPath, pw, kf, mode, true, comp, progress, statusLabel)
 	})
+
+	folderRow := container.NewBorder(nil, nil, nil, folderBrowseBtn, folderPathEntry)
+	folderSection := container.NewVBox(
+		folderRow,
+		encFolderGoBtn,
+	)
 
 	layers := canvas.NewText("S-Box x4 > Diffuse > 3xFeistel(64R) > AES > XChaCha > AES > XChaCha > AES > 5x Integrity", colDimText)
 	layers.TextSize = 11
@@ -2534,7 +2560,9 @@ func main() {
 		neonSeparator(colSep),
 		compressCheck,
 		neonSeparator(colSep),
-		container.NewGridWithColumns(2, encFileBtn, encFolderBtn),
+		encFileBtn,
+		neonSeparator(colSep),
+		folderSection,
 		layers,
 	))
 
