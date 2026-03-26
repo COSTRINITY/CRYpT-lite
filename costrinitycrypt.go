@@ -290,8 +290,8 @@ var (
 	colPlaceholder = color.RGBA{R: 45, G: 55, B: 75, A: 255}
 	colSuccess    = color.RGBA{R: 0, G: 255, B: 180, A: 255}
 	colWarn       = color.RGBA{R: 255, G: 160, B: 0, A: 255}
-	colDimText    = color.RGBA{R: 40, G: 55, B: 80, A: 255}
-	colMidText    = color.RGBA{R: 60, G: 80, B: 110, A: 255}
+	colDimText    = color.RGBA{R: 70, G: 90, B: 120, A: 255}
+	colMidText    = color.RGBA{R: 90, G: 110, B: 145, A: 255}
 	colError      = color.RGBA{R: 255, G: 40, B: 60, A: 255}
 )
 
@@ -342,9 +342,17 @@ func (t *costrinityTheme) Icon(n fyne.ThemeIconName) fyne.Resource { return them
 func (t *costrinityTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNamePadding:
-		return 6
+		return 7
 	case theme.SizeNameInnerPadding:
-		return 10
+		return 12
+	case theme.SizeNameText:
+		return 14
+	case theme.SizeNameSubHeadingText:
+		return 16
+	case theme.SizeNameHeadingText:
+		return 20
+	case theme.SizeNameCaptionText:
+		return 12
 	case theme.SizeNameSeparatorThickness:
 		return 1
 	default:
@@ -2189,11 +2197,11 @@ func main() {
 	titleMain.TextStyle = fyne.TextStyle{Bold: true}
 
 	titleSub := canvas.NewText("COSTRINITY CIPHER PROTOCOL", colCyanDim)
-	titleSub.TextSize = 10
+	titleSub.TextSize = 13
 	titleSub.Alignment = fyne.TextAlignCenter
 
 	edition := canvas.NewText("OBSIDIAN EDITION v6.0  //  17-Layer Cascade  //  5-Cipher AEAD  //  Double Argon2id  //  Quint Integrity", colMidText)
-	edition.TextSize = 9
+	edition.TextSize = 12
 	edition.Alignment = fyne.TextAlignCenter
 
 	// ── License status indicator ──
@@ -2235,7 +2243,7 @@ func main() {
 
 	// ── Password ──
 	pwLabel := canvas.NewText("PASSWORD", colCyanDim)
-	pwLabel.TextSize = 10
+	pwLabel.TextSize = 13
 	pwLabel.TextStyle = fyne.TextStyle{Bold: true}
 
 	pwEntry := widget.NewPasswordEntry()
@@ -2287,7 +2295,7 @@ func main() {
 
 	// ════════ ENCRYPT TAB ════════
 	encHeader := canvas.NewText("SECURITY MODE", colCyanDim)
-	encHeader.TextSize = 10
+	encHeader.TextSize = 13
 	encHeader.TextStyle = fyne.TextStyle{Bold: true}
 
 	modeSelect := widget.NewRadioGroup([]string{"Standard", "Military", "Paranoid (PRO)", "FORTRESS (PRO)"}, func(s string) {
@@ -2306,11 +2314,11 @@ func main() {
 	modeSelect.Selected = "Military"
 
 	modeDesc := canvas.NewText("Standard: 256MB  |  Military: 512MB  |  Paranoid: 1GB (PRO)  |  FORTRESS: 2GB (PRO)", colDimText)
-	modeDesc.TextSize = 9
+	modeDesc.TextSize = 12
 	modeDesc.Alignment = fyne.TextAlignCenter
 
 	fortressWarn := canvas.NewText("FORTRESS mode uses 2GB RAM + 32 iterations — maximum brute-force resistance", colWarn)
-	fortressWarn.TextSize = 9
+	fortressWarn.TextSize = 12
 	fortressWarn.Alignment = fyne.TextAlignCenter
 
 	compressCheck := widget.NewCheck("Compress before encryption", func(v bool) { compressEnabled = v })
@@ -2349,7 +2357,7 @@ func main() {
 				return
 			}
 			refreshLicenseUI()
-			notifyStatus(statusLabel, "Pro license activated! Paranoid + FORTRESS modes unlocked.")
+			notifyStatus(statusLabel, "Activated — Paranoid + FORTRESS modes unlocked")
 		}, w)
 		d.Resize(fyne.NewSize(480, 200))
 		d.Show()
@@ -2357,10 +2365,9 @@ func main() {
 
 	// showProRequiredDialog shows a dialog when non-pro user selects a pro mode
 	showProRequiredDialog := func() {
-		dialog.ShowInformation("Pro License Required",
-			"Paranoid and FORTRESS modes require a Pro license.\n\n"+
-				"Enter your activation code using the 'Activate Pro' button,\n"+
-				"or purchase at costrinity.xyz/crypt ($14.99).", w)
+		dialog.ShowInformation("Activation Required",
+			"Paranoid and FORTRESS modes require an activation code.\n\n"+
+				"Purchase at costrinity.xyz/crypt to receive your code.", w)
 	}
 
 	encFileBtn := widget.NewButton("Encrypt File", func() {
@@ -2408,7 +2415,7 @@ func main() {
 	})
 
 	layers := canvas.NewText("S-Box x4 > Diffuse > 3xFeistel(64R) > AES > XChaCha > AES > XChaCha > AES > 5x Integrity", colDimText)
-	layers.TextSize = 8
+	layers.TextSize = 11
 	layers.Alignment = fyne.TextAlignCenter
 
 	encryptTab := container.NewVScroll(container.NewVBox(
@@ -2465,10 +2472,10 @@ func main() {
 	})
 
 	decInfo1 := canvas.NewText("Verify checks password + triple integrity without decrypting", colDimText)
-	decInfo1.TextSize = 9
+	decInfo1.TextSize = 12
 	decInfo1.Alignment = fyne.TextAlignCenter
 	decInfo2 := canvas.NewText("Auto-detects v2 / v3 / v4 format  //  Full backward compatibility", colDimText)
-	decInfo2.TextSize = 9
+	decInfo2.TextSize = 12
 	decInfo2.Alignment = fyne.TextAlignCenter
 
 	decryptTab := container.NewVScroll(container.NewVBox(
@@ -2521,7 +2528,7 @@ func main() {
 	})
 
 	toolsHeader := canvas.NewText("PASSWORD GENERATOR", colCyanDim)
-	toolsHeader.TextSize = 10
+	toolsHeader.TextSize = 13
 	toolsHeader.TextStyle = fyne.TextStyle{Bold: true}
 
 	toolsTab := container.NewVScroll(container.NewVBox(
@@ -2541,11 +2548,11 @@ func main() {
 	aboutTitle.Alignment = fyne.TextAlignCenter
 
 	aboutProto := canvas.NewText("Costrinity Cipher Language Protocol v5", colCyanDim)
-	aboutProto.TextSize = 10
+	aboutProto.TextSize = 13
 	aboutProto.Alignment = fyne.TextAlignCenter
 
 	aboutLayersHdr := canvas.NewText("17-LAYER ENCRYPTION ARCHITECTURE", colCyan)
-	aboutLayersHdr.TextSize = 10
+	aboutLayersHdr.TextSize = 13
 	aboutLayersHdr.TextStyle = fyne.TextStyle{Bold: true}
 
 	aboutLayers := widget.NewLabel(
@@ -2565,7 +2572,7 @@ func main() {
 			"  L13  Full-file HMAC (header + payload authentication)")
 
 	aboutSecHdr := canvas.NewText("SECURITY HIGHLIGHTS", colCyan)
-	aboutSecHdr.TextSize = 10
+	aboutSecHdr.TextSize = 13
 	aboutSecHdr.TextStyle = fyne.TextStyle{Bold: true}
 
 	aboutSec := widget.NewLabel(
@@ -2583,7 +2590,7 @@ func main() {
 			"  - All intermediate buffers wiped between layers")
 
 	aboutFinal := canvas.NewText("Every layer must be independently defeated  //  No known or theoretical shortcut exists", colMidText)
-	aboutFinal.TextSize = 9
+	aboutFinal.TextSize = 12
 	aboutFinal.Alignment = fyne.TextAlignCenter
 
 	aboutTab := container.NewVScroll(container.NewVBox(
@@ -2611,7 +2618,7 @@ func main() {
 	statusLine := neonSeparator(colCyanDark)
 
 	footer := canvas.NewText("CRYpT OBSIDIAN EDITION  //  5-Cipher AEAD Cascade Encryption", colDimText)
-	footer.TextSize = 8
+	footer.TextSize = 11
 	footer.Alignment = fyne.TextAlignCenter
 
 	// Top section: title + password + key file (fixed height)
