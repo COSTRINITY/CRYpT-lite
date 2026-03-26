@@ -11,10 +11,10 @@
     "#1": {
       "0409": {
         "identity": {
-          "name": "com.costrinity.CRYpT",
-          "version": "5.0.0.0"
+          "name": "COSTRINITY.CRYpT",
+          "version": "6.0.0.0"
         },
-        "description": "CRYpT v5.0 CITADEL EDITION",
+        "description": "CRYpT v6.0 OBSIDIAN — COSTRINITY Cipher Protocol",
         "minimum-os": "win7",
         "execution-level": "as invoker",
         "ui-access": false,
@@ -36,18 +36,19 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "5.0.0.0",
-          "product_version": "5.0.0.0"
+          "file_version": "6.0.0.0",
+          "product_version": "6.0.0.0"
         },
         "info": {
           "0409": {
-            "CompanyName": "Costrinity",
-            "FileDescription": "CRYpT v5.0 CITADEL EDITION - Multi-Layer Cascade Encryption",
-            "FileVersion": "5.0.0.0",
+            "CompanyName": "COSTRINITY",
+            "LegalCopyright": "© 2026 COSTRINITY. All rights reserved.",
+            "FileDescription": "CRYpT v6.0 OBSIDIAN — Multi-Layer Cascade Encryption",
+            "FileVersion": "6.0.0.0",
             "InternalName": "CRYpT",
             "OriginalFilename": "CRYpT.exe",
-            "ProductName": "CRYpT",
-            "ProductVersion": "5.0.0.0"
+            "ProductName": "CRYpT — COSTRINITY Cipher Protocol",
+            "ProductVersion": "6.0.0.0"
           }
         }
       }

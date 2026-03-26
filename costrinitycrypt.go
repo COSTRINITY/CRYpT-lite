@@ -1,66 +1,48 @@
 package main
 
 // ============================================================================
-// COSTRINITY: CRYpT v6.1 — Free Edition (Lite)
-// Costrinity Cipher Language (CCL) Protocol v6.1 — Hardened
+// COSTRINITY: CRYpT v4.0 FORTRESS EDITION
+// Costrinity Cipher Language (CCL) Protocol v4
 //
-// THE ALGORITHM ITSELF IS SECRET.
-// CCL derives the cipher pipeline structure from key material.
-// An attacker observing only ciphertext has no idea what operations ran.
+// 10-Layer Encryption Architecture:
+//   L0   Argon2id KDF         Memory-hard (128MB–1GB), 128-byte salt
+//   L1   zlib Compression     Optional pre-encryption compression
+//   L2   Canary Injection     32-byte chain-verification sentinel
+//   L3   Payload Padding      Random 256–4096 byte size obfuscation
+//   L4   Double S-Box         Two independent key-derived substitution passes
+//   L5   Cascade Diffusion    XOR key-stream + cascading feedback + block rotation
+//   L6   Feistel Network      32-round Luby-Rackoff cipher (SHA-256 PRF)
+//   L7   AES-256-GCM #1       NIST authenticated encryption (pass 1)
+//   L8   XChaCha20-Poly1305   IETF authenticated encryption
+//   L9   AES-256-GCM #2       NIST authenticated encryption (pass 2)
+//   L10  Triple Integrity     HMAC-SHA3-512 + BLAKE2b-512 + HMAC-SHA512
 //
-// 22-Layer Encryption Architecture:
-//   L0   Triple KDF Cascade     Argon2id → scrypt → HKDF-SHA3 (sequential)
-//   L1   zlib Compression       Optional pre-encryption compression
-//   L2   Dual Canary            Head + tail chain-verification sentinels
-//   L3   Payload Padding        Random 512–8192 byte size obfuscation
-//   L4   SHAKE-256 Pre-Whiten   Keccak XOF stream cipher (destroys input patterns)
-//   L5   CCL S-Box ×4-8         Key-derived pass count, key-derived tables
-//   L6   Cascade Diffusion      XOR key-stream (SHAKE-256) + cascading feedback
-//   L7   Block Permutation      Key-derived block reordering (transposition)
-//   L8   CCL Feistel ×3-6       Key-derived pass count, BLAKE2b PRF, 64-127 rounds
-//   L9   SHAKE-256 Post-Whiten  Keccak XOF stream cipher (post-custom-layer)
-//   L10  AES-256-GCM #1         NIST authenticated encryption
-//   L11  XChaCha20-Poly1305 #1  IETF extended-nonce AEAD
-//   L12  AES-256-GCM #2         NIST authenticated encryption
-//   L13  XChaCha20-Poly1305 #2  IETF extended-nonce AEAD
-//   L14  AES-256-GCM #3         NIST authenticated encryption
-//   L15  XChaCha20-Poly1305 #3  IETF extended-nonce AEAD
-//   L16  Quintuple Integrity    2×HMAC-SHA3 + BLAKE2b + HMAC-SHA512 + full-file
-//
-// Security fixes in v6.1:
-//   - Feistel F-function: SHA-256 → BLAKE2b keyed PRF (proper per-round keys)
-//   - scrypt fallback: silent degradation removed → hard abort on failure
-//   - keyStream: SHA-256 counter mode → SHAKE-256 XOF (proper stream cipher)
-//   - Pre + post SHAKE-256 whitening added (4th distinct cipher family: Keccak)
-//   - Activation: exec curl → native net/http (no external dependency)
-//
-// Triple KDF (attacker must defeat ALL THREE sequentially):
-//   Stage 1: Argon2id (memory-hard, GPU-resistant)
-//   Stage 2: scrypt   (memory-hard, different algorithm)
-//   Stage 3: HKDF-SHA3-512 (extract-and-expand with domain separation)
-//
-// CCL Innovation:
-//   The number of S-Box passes, Feistel passes, and rounds per Feistel
-//   are derived from a hash of (masterKey + publicSeed). The publicSeed
-//   is stored in the header, but without the masterKey an attacker cannot
-//   determine the actual cipher pipeline that was executed.
+// Tamper Defenses:
+//   - Encrypted canary verifies full cipher chain integrity
+//   - Triple integrity: three independent hash families (Keccak/HAIFA/Merkle-Damgård)
+//   - Random padding hides actual payload size
+//   - 7-pass Gutmann-class file shredding
+//   - Memory-safe key zeroing after use
+//   - Minimum 12-character password enforcement
+//   - 128-byte cryptographic salt
+//   - Anti-forensic random header padding
 //
 // Cipher Diversity (attacker must independently break ALL):
-//   AES-256       Substitution-Permutation Network (×3)
-//   XChaCha20     Add-Rotate-XOR stream cipher (×3)
-//   Feistel       Custom block cipher, 192-762 total rounds
-//   S-Box×4-8     Key-dependent substitution tables
-//   scrypt        Memory-hard KDF (sequential with Argon2id)
-//   Argon2id      Memory-hard KDF (sequential with scrypt)
-//   SHA3-512      Keccak sponge (HKDF + HMAC ×2)
-//   BLAKE2b       HAIFA construction (keyed hash)
+//   AES-256       Substitution-Permutation Network
+//   ChaCha20      Add-Rotate-XOR stream cipher
+//   Feistel(32)   Custom block cipher via Luby-Rackoff theorem
+//   S-Box×2       Key-dependent substitution (confusion)
+//   Diffusion     Cascade XOR + block rotation (diffusion)
+//   SHA-256       Merkle-Damgård (Feistel PRF + key stream)
 //   SHA-512       Merkle-Damgård (HMAC)
+//   SHA3-512      Keccak sponge (HMAC)
+//   BLAKE2b       HAIFA (keyed hash)
 //
-// File Format v6 (.crypt):
+// File Format v4 (.crypt):
 //   [Magic "CCL2" 4B][Version 2B][Flags 1B][Mode 1B]
-//   [Salt 384B][CCLSeed 32B][Nonces 144B][Padding 64B]
+//   [Salt 128B][Nonce1 12B][Nonce2 12B][NonceXC 24B][Padding 32B]
 //   [Encrypted Payload ...variable...]
-//   [HMAC-SHA3 #1 64B][BLAKE2b 64B][HMAC-SHA512 64B][HMAC-SHA3 #2 64B][FullHMAC 64B]
+//   [HMAC-SHA3-512 64B][BLAKE2b-512 64B][HMAC-SHA512 64B]
 // ============================================================================
 
 import (
@@ -75,6 +57,7 @@ import (
 	"crypto/sha512"
 	"embed"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image/color"
@@ -93,10 +76,7 @@ import (
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20poly1305"
-	"golang.org/x/crypto/hkdf"
-	"golang.org/x/crypto/scrypt"
 	"golang.org/x/crypto/sha3"
-	"net/http"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -123,47 +103,35 @@ const (
 	versionV3 = uint16(3)
 	versionV4 = uint16(4)
 	versionV5 = uint16(5)
-	versionV6 = uint16(6)
 
-	// v6 OBSIDIAN format
-	v6SaltSize     = 384 // 3 independent salts × 128 bytes each
-	v6CCLSeedSize  = 32  // Public seed for CCL parameter derivation
-	v6NonceSection = 144 // 6 AEAD passes: 3×AES(12B) + 3×XChaCha(24B) = 36+72 = 108, padded to 144
-	v6PadHdr       = 64
-	v6HeaderSize   = 4 + 2 + 1 + 1 + v6SaltSize + v6CCLSeedSize + v6NonceSection + v6PadHdr // 632
-	v6TrailingSize = 64 * 5                                                                 // 5 integrity hashes
-	v6MaxKeySize   = 2048                                                                   // Maximum derived key material
-
-	// v5 backward compat
-	v5HeaderSize   = 412
-	v5TrailingSize = 320
+	// v5 OBSIDIAN format: 5-cipher AEAD cascade, quad S-Box, triple 64-round Feistel, double Argon2id
+	v5HeaderSize   = 412 // 4+2+1+1+256+12+12+12+24+24+64
+	v5TrailingSize = 320 // sha3_1(64)+blake2b(64)+hmac512(64)+sha3_2(64)+fullHMAC(64)
 	v5SaltSize     = 256
-	v5KeySize      = 640
+	v5KeySize      = 640 // 20 sub-keys × 32
+	v5PadHdr       = 64
 
-	// v4 backward compat
-	v4HeaderSize   = 216
-	v4TrailingSize = 192
-	v4SaltSize     = 128
-	v4KeySize      = 352
-	v4NonceAES     = 12
-	v4NonceXC      = 24
-	v4PadHdr       = 32
+	v4HeaderSize  = 216 // 4+2+1+1+128+12+12+24+32
+	v4TrailingSize = 192 // sha3(64)+blake2b(64)+hmac(64)
+	v4SaltSize    = 128
+	v4KeySize     = 352 // 11 sub-keys × 32
+	v4NonceAES    = 12
+	v4NonceXC     = 24
+	v4PadHdr      = 32
+	canarySize    = 32
 
-	canarySize = 32
-	nonceAES   = 12
-	nonceXC    = 24
+	nonceAES = 12
+	nonceXC  = 24
 
-	// v3 backward compat
-	v3HeaderSize   = 124
+	v3HeaderSize  = 124
 	v3TrailingSize = 128
-	v3SaltSize     = 64
-	v3KeySize      = 224
+	v3SaltSize    = 64
+	v3KeySize     = 224
 
-	// v2 backward compat
-	v2HeaderSize   = 107
+	v2HeaderSize  = 107
 	v2TrailingSize = 128
-	v2SaltSize     = 64
-	v2KeySize      = 192
+	v2SaltSize    = 64
+	v2KeySize     = 192
 
 	keySize     = 32
 	hmacSize    = 64
@@ -183,181 +151,148 @@ const (
 	ModeFortress
 )
 
-var modeNames = [...]string{"Standard", "Military", "PRO ONLY", "PRO ONLY"}
+var modeNames = [...]string{"Standard", "Military", "Paranoid", "FORTRESS"}
 
 // ============================================================================
-// CCL PARAMETERS — THE SECRET ALGORITHM
+// LICENSE / ACTIVATION SYSTEM
 // ============================================================================
 
-// CCLParams defines the key-derived cipher pipeline configuration.
-// These parameters are derived from hash(masterKey + publicSeed).
-// An attacker with only the publicSeed cannot determine the pipeline.
-type CCLParams struct {
-	SBoxPasses    int   // 4-8 S-Box substitution passes
-	FeistelPasses int   // 3-6 Feistel network passes
-	FeistelRounds []int // Rounds per Feistel pass (64-127 each)
+const proSalt = "COSTRINITY_CRYPT_PRO_SALT_2026"
+
+type LicenseInfo struct {
+	Code        string `json:"code"`
+	ActivatedAt string `json:"activated_at"`
+	Email       string `json:"email"`
 }
 
-// deriveCCLParams derives the cipher pipeline configuration from key material.
-// The seed is stored publicly in the header, but without the master key,
-// an attacker cannot determine what operations were actually performed.
-func deriveCCLParams(masterKey, publicSeed []byte) CCLParams {
-	// Hash the master key with the public seed to get deterministic but secret params
-	h := sha3.New512()
-	h.Write(masterKey)
-	h.Write(publicSeed)
-	h.Write([]byte("COSTRINITY_CCL_PARAMS_V6"))
-	digest := h.Sum(nil)
-
-	// Derive S-Box passes: 4-8 (use first byte mod 5 + 4)
-	sboxPasses := int(digest[0]%5) + 4
-
-	// Derive Feistel passes: 3-6 (use second byte mod 4 + 3)
-	feistelPasses := int(digest[1]%4) + 3
-
-	// Derive rounds per Feistel pass: 64-127 each
-	feistelRounds := make([]int, feistelPasses)
-	for i := 0; i < feistelPasses; i++ {
-		// Use bytes 2+ for round counts
-		feistelRounds[i] = int(digest[2+i]%64) + 64
+// licenseFilePath returns ~/.costrinity/license.json
+func licenseFilePath() string {
+	u, err := user.Current()
+	if err != nil {
+		return ""
 	}
+	return filepath.Join(u.HomeDir, ".costrinity", "license.json")
+}
 
-	return CCLParams{
-		SBoxPasses:    sboxPasses,
-		FeistelPasses: feistelPasses,
-		FeistelRounds: feistelRounds,
+// loadLicense reads the license file from disk
+func loadLicense() *LicenseInfo {
+	p := licenseFilePath()
+	if p == "" {
+		return nil
 	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil
+	}
+	var li LicenseInfo
+	if err := json.Unmarshal(data, &li); err != nil {
+		return nil
+	}
+	return &li
 }
 
-// ============================================================================
-// TRIPLE KDF PARAMETERS
-// ============================================================================
-
-type tripleKDFParams struct {
-	// Argon2id params
-	argonTime    uint32
-	argonMemory  uint32
-	argonThreads uint8
-	// scrypt params
-	scryptN int
-	scryptR int
-	scryptP int
+// saveLicense writes the license file to disk
+func saveLicense(li *LicenseInfo) error {
+	p := licenseFilePath()
+	if p == "" {
+		return fmt.Errorf("cannot determine home directory")
+	}
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(li, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, data, 0600)
 }
 
-// v6 OBSIDIAN params — Triple KDF with massive memory requirements
-var v6ModeParams = map[int]tripleKDFParams{
-	ModeStandard: {
-		argonTime: 4, argonMemory: 256 * 1024, argonThreads: 4,
-		scryptN: 1 << 17, scryptR: 8, scryptP: 1, // 128MB scrypt
-	},
-	ModeMilitary: {
-		argonTime: 8, argonMemory: 512 * 1024, argonThreads: 8,
-		scryptN: 1 << 18, scryptR: 8, scryptP: 1, // 256MB scrypt
-	},
-	// Paranoid + FORTRESS available in CRYpT Pro — costrinity.xyz/crypt
-	// ModeParanoid: Pro only
-	// ModeFortress: Pro only
+// validateActivationCode checks that a code is 32 hex chars and
+// SHA256(code + salt)[:8] starts with "c057".
+func validateActivationCode(code string) bool {
+	if len(code) != 32 {
+		return false
+	}
+	// Must be valid hex
+	if _, err := hex.DecodeString(code); err != nil {
+		return false
+	}
+	h := sha256.Sum256([]byte(code + proSalt))
+	prefix := hex.EncodeToString(h[:4]) // first 8 hex chars
+	return strings.HasPrefix(prefix, "c057")
 }
 
-// v4/v5 backward-compat params
+// isProUnlocked checks if a valid Pro license exists on disk.
+func isProUnlocked() bool {
+	li := loadLicense()
+	if li == nil {
+		return false
+	}
+	return validateActivationCode(li.Code)
+}
+
+// requiresProLicense returns true if the mode needs a Pro license.
+func requiresProLicense(mode int) bool {
+	return mode == ModeParanoid || mode == ModeFortress
+}
+
 type argon2Params struct {
 	time    uint32
 	memory  uint32
 	threads uint8
 }
 
+// v4 backward-compat params (used for decrypting old files)
 var modeParams = map[int]argon2Params{
 	ModeStandard: {time: 3, memory: 128 * 1024, threads: 4},
 	ModeMilitary: {time: 5, memory: 256 * 1024, threads: 4},
-	// ModeParanoid + ModeFortress: Pro only
+	ModeParanoid: {time: 8, memory: 512 * 1024, threads: 8},
+	ModeFortress: {time: 16, memory: 1024 * 1024, threads: 16}, // 1 GB
 }
 
+// v5 OBSIDIAN params — doubled iterations, doubled memory
 var v5ModeParams = map[int]argon2Params{
-	ModeStandard: {time: 6, memory: 256 * 1024, threads: 4},
-	ModeMilitary: {time: 10, memory: 512 * 1024, threads: 8},
-	// ModeParanoid + ModeFortress: Pro only
+	ModeStandard: {time: 6, memory: 256 * 1024, threads: 4},     // 256 MB
+	ModeMilitary: {time: 10, memory: 512 * 1024, threads: 8},    // 512 MB
+	ModeParanoid: {time: 16, memory: 1024 * 1024, threads: 8},   // 1 GB
+	ModeFortress: {time: 32, memory: 2 * 1024 * 1024, threads: 16}, // 2 GB
 }
-
-// ============================================================================
-// TRIPLE KDF — THE UNBREAKABLE KEY DERIVATION
-// ============================================================================
-
-// tripleKDF derives key material through three sequential memory-hard functions.
-// An attacker must defeat Argon2id, THEN scrypt, THEN HKDF-SHA3.
-// Each stage uses an independent salt. Total memory: up to 3GB for FORTRESS.
-func tripleKDF(password []byte, salts []byte, params tripleKDFParams, keyLen int) []byte {
-	// Split the 384-byte salt into three independent 128-byte salts
-	salt1 := salts[0:128]
-	salt2 := salts[128:256]
-	salt3 := salts[256:384]
-
-	// Stage 1: Argon2id — GPU-resistant memory-hard function
-	stage1 := argon2.IDKey(password, salt1, params.argonTime, params.argonMemory, params.argonThreads, 64)
-
-	// Stage 2: scrypt — Different memory-hard algorithm, sequential with stage 1
-	// Input is the OUTPUT of stage 1, not the original password
-	stage2Input := append(stage1, password...)
-	stage2, err := scrypt.Key(stage2Input, salt2, params.scryptN, params.scryptR, params.scryptP, 64)
-	if err != nil {
-		// SECURITY: never silently degrade to a weaker KDF.
-		// If scrypt fails the entire encryption must abort.
-		wipeBytes(stage1)
-		wipeBytes(stage2Input)
-		panic("CRITICAL: scrypt KDF failed — encryption aborted: " + err.Error())
-	}
-	wipeBytes(stage1)
-	wipeBytes(stage2Input)
-
-	// Stage 3: HKDF-SHA3-512 — Extract-and-expand with domain separation
-	// Combines both previous stages for final key material
-	hkdfInput := append(stage2, password...)
-	hkdfReader := hkdf.New(sha3.New512, hkdfInput, salt3, []byte("COSTRINITY_OBSIDIAN_V6_MASTER_KEY"))
-	masterKey := make([]byte, keyLen)
-	io.ReadFull(hkdfReader, masterKey)
-	wipeBytes(stage2)
-	wipeBytes(hkdfInput)
-
-	return masterKey
-}
-
-// ============================================================================
-// METADATA
-// ============================================================================
 
 type CryptMeta struct {
 	Filename string `json:"f"`
-	Size     int64  `json:"s"`
-	DataSize int64  `json:"c"`
+	Size     int64  `json:"s"` // original uncompressed
+	DataSize int64  `json:"c"` // payload data size (post-compress)
 	Time     int64  `json:"t"`
-	Hash     string `json:"h"`
+	Hash     string `json:"h"` // SHA-256 of payload data
 	IsDir    bool   `json:"d"`
 	Ver      int    `json:"v"`
 }
 
 var canaryValue = sha256.Sum256([]byte("COSTRINITY_CIPHER_CANARY_V4_FORTRESS"))
-var canaryV5 = sha256.Sum256([]byte("COSTRINITY_CITADEL_CANARY_V5_QUINTUPLE_CASCADE"))
-var canaryV6 = sha256.Sum256([]byte("COSTRINITY_OBSIDIAN_CANARY_V6_CCL_ALGORITHM_IS_SECRET"))
+var canaryV5 = sha256.Sum256([]byte("COSTRINITY_OBSIDIAN_CANARY_V5_QUINTUPLE_CASCADE"))
 
 // ============================================================================
 // THEME
 // ============================================================================
 
+// Futuristic neon color palette
 var (
-	colBg          = color.RGBA{R: 2, G: 2, B: 8, A: 255}
-	colFg          = color.RGBA{R: 200, G: 215, B: 235, A: 255}
-	colCyan        = color.RGBA{R: 0, G: 220, B: 255, A: 255}
-	colCyanDim     = color.RGBA{R: 0, G: 140, B: 200, A: 255}
-	colCyanDark    = color.RGBA{R: 0, G: 60, B: 90, A: 255}
-	colInputBg     = color.RGBA{R: 8, G: 8, B: 18, A: 255}
-	colOverlay     = color.RGBA{R: 4, G: 4, B: 12, A: 255}
-	colSep         = color.RGBA{R: 0, G: 40, B: 60, A: 255}
-	colDisabled    = color.RGBA{R: 30, G: 35, B: 50, A: 255}
+	colBg         = color.RGBA{R: 2, G: 2, B: 8, A: 255}
+	colFg         = color.RGBA{R: 200, G: 215, B: 235, A: 255}
+	colCyan       = color.RGBA{R: 0, G: 220, B: 255, A: 255}
+	colCyanDim    = color.RGBA{R: 0, G: 140, B: 200, A: 255}
+	colCyanDark   = color.RGBA{R: 0, G: 60, B: 90, A: 255}
+	colInputBg    = color.RGBA{R: 8, G: 8, B: 18, A: 255}
+	colOverlay    = color.RGBA{R: 4, G: 4, B: 12, A: 255}
+	colSep        = color.RGBA{R: 0, G: 40, B: 60, A: 255}
+	colDisabled   = color.RGBA{R: 30, G: 35, B: 50, A: 255}
 	colPlaceholder = color.RGBA{R: 45, G: 55, B: 75, A: 255}
-	colSuccess     = color.RGBA{R: 0, G: 255, B: 180, A: 255}
-	colWarn        = color.RGBA{R: 255, G: 160, B: 0, A: 255}
-	colDimText     = color.RGBA{R: 40, G: 55, B: 80, A: 255}
-	colMidText     = color.RGBA{R: 60, G: 80, B: 110, A: 255}
-	colError       = color.RGBA{R: 255, G: 40, B: 60, A: 255}
+	colSuccess    = color.RGBA{R: 0, G: 255, B: 180, A: 255}
+	colWarn       = color.RGBA{R: 255, G: 160, B: 0, A: 255}
+	colDimText    = color.RGBA{R: 40, G: 55, B: 80, A: 255}
+	colMidText    = color.RGBA{R: 60, G: 80, B: 110, A: 255}
+	colError      = color.RGBA{R: 255, G: 40, B: 60, A: 255}
 )
 
 type costrinityTheme struct{}
@@ -417,6 +352,7 @@ func (t *costrinityTheme) Size(n fyne.ThemeSizeName) float32 {
 	}
 }
 
+// neonSeparator creates a colored line for visual separation
 func neonSeparator(c color.Color) fyne.CanvasObject {
 	line := canvas.NewRectangle(c)
 	line.SetMinSize(fyne.NewSize(0, 1))
@@ -424,7 +360,7 @@ func neonSeparator(c color.Color) fyne.CanvasObject {
 }
 
 // ============================================================================
-// COSTRINITY S-BOX + DIFFUSION
+// COSTRINITY S-BOX + DIFFUSION (supports multi-key double S-box)
 // ============================================================================
 
 func generateSBox(key []byte) [256]byte {
@@ -449,36 +385,20 @@ func inverseSBox(sbox [256]byte) [256]byte {
 	return inv
 }
 
-// generateKeyStream uses SHAKE-256 (Keccak XOF) for a proper extendable output.
-// This is cryptographically stronger than SHA-256 counter mode — it's a dedicated
-// stream cipher construction rather than a hash function repurposed as one.
 func generateKeyStream(key []byte, length int) []byte {
-	h := sha3.NewShake256()
-	h.Write(key)
-	h.Write([]byte("COSTRINITY_CCL_KEYSTREAM_V6"))
-	stream := make([]byte, length)
-	h.Read(stream)
-	return stream
-}
-
-// xorWhiten applies SHAKE-256 key whitening to the data.
-// This adds a full Keccak-based stream cipher layer (4th distinct cipher family).
-// Applied both BEFORE and AFTER the custom CCL pipeline for defense in depth.
-func xorWhiten(data, key, label []byte) []byte {
-	h := sha3.NewShake256()
-	h.Write(key)
-	h.Write(label)
-	stream := make([]byte, len(data))
-	h.Read(stream)
-	out := make([]byte, len(data))
-	for i := range data {
-		out[i] = data[i] ^ stream[i]
+	stream := make([]byte, 0, length+32)
+	ctr := make([]byte, 8)
+	for c := uint64(0); len(stream) < length; c++ {
+		h := sha256.New()
+		h.Write(key)
+		binary.BigEndian.PutUint64(ctr, c)
+		h.Write(ctr)
+		stream = append(stream, h.Sum(nil)...)
 	}
-	wipeBytes(stream)
-	return out
+	return stream[:length]
 }
 
-// costrinityTransform applies S-Box substitution and cascade diffusion
+// costrinityTransform: pass 1+ sboxKeys for multi-pass substitution
 func costrinityTransform(data, diffuseKey []byte, encrypt bool, sboxKeys ...[]byte) []byte {
 	out := make([]byte, len(data))
 	copy(out, data)
@@ -544,70 +464,7 @@ func rotateSlice(b []byte, n int) {
 }
 
 // ============================================================================
-// BLOCK PERMUTATION — TRANSPOSITION LAYER
-// ============================================================================
-
-// blockPermute reorders fixed-size blocks using a key-derived permutation.
-// This is a transposition cipher layer that complements the S-Box substitution.
-func blockPermute(data, key []byte, encrypt bool) []byte {
-	const blockSize = 64
-	numBlocks := len(data) / blockSize
-	remainder := len(data) % blockSize
-
-	if numBlocks < 2 {
-		return data // Not enough blocks to permute
-	}
-
-	// Generate permutation from key using Fisher-Yates
-	perm := make([]int, numBlocks)
-	for i := range perm {
-		perm[i] = i
-	}
-
-	// Seed the shuffle with key material
-	h := sha3.New512()
-	h.Write(key)
-	h.Write([]byte("COSTRINITY_BLOCK_PERMUTE"))
-	seed := h.Sum(nil)
-
-	for i := numBlocks - 1; i > 0; i-- {
-		// Generate random index using seed bytes
-		h.Reset()
-		h.Write(seed)
-		h.Write([]byte{byte(i), byte(i >> 8)})
-		seed = h.Sum(nil)
-		j := int(binary.BigEndian.Uint64(seed[:8])) % (i + 1)
-		perm[i], perm[j] = perm[j], perm[i]
-	}
-
-	out := make([]byte, len(data))
-
-	if encrypt {
-		// Apply permutation
-		for i := 0; i < numBlocks; i++ {
-			srcStart := i * blockSize
-			dstStart := perm[i] * blockSize
-			copy(out[dstStart:dstStart+blockSize], data[srcStart:srcStart+blockSize])
-		}
-	} else {
-		// Apply inverse permutation
-		for i := 0; i < numBlocks; i++ {
-			srcStart := perm[i] * blockSize
-			dstStart := i * blockSize
-			copy(out[dstStart:dstStart+blockSize], data[srcStart:srcStart+blockSize])
-		}
-	}
-
-	// Copy remainder unchanged
-	if remainder > 0 {
-		copy(out[numBlocks*blockSize:], data[numBlocks*blockSize:])
-	}
-
-	return out
-}
-
-// ============================================================================
-// COSTRINITY FEISTEL NETWORK
+// COSTRINITY FEISTEL NETWORK (parameterised rounds)
 // ============================================================================
 
 func costrinityFeistel(data, key []byte, encrypt bool, rounds int) []byte {
@@ -658,32 +515,12 @@ func costrinityFeistel(data, key []byte, encrypt bool, rounds int) []byte {
 	return out
 }
 
-// feistelF uses BLAKE2b as a proper keyed PRF.
-// SHA-256 is NOT designed as a keyed PRF — BLAKE2b with a key parameter is.
-// This means each round's F-function is cryptographically independent.
-// Per-round mixing: key + round index ensures no two rounds share the same PRF output.
 func feistelF(half, key []byte, round int) []byte {
-	// Derive a per-round key by mixing the base key with the round index
-	roundTag := make([]byte, 4)
-	binary.BigEndian.PutUint32(roundTag, uint32(round))
-	perRoundKey := make([]byte, 32)
-	h0 := sha256.New()
-	h0.Write(key)
-	h0.Write(roundTag)
-	copy(perRoundKey, h0.Sum(nil))
-
-	// BLAKE2b-256 with the per-round key: proper keyed PRF
-	b2, err := blake2b.New(16, perRoundKey)
-	if err != nil {
-		// Fallback (shouldn't happen — key is always 32 bytes)
-		h := sha256.New()
-		h.Write(half)
-		h.Write(perRoundKey)
-		return h.Sum(nil)[:16]
-	}
-	b2.Write(half)
-	b2.Write(roundTag)
-	return b2.Sum(nil)
+	h := sha256.New()
+	h.Write(half)
+	h.Write(key)
+	h.Write([]byte{byte(round), byte(round >> 8)})
+	return h.Sum(nil)[:16]
 }
 
 // ============================================================================
@@ -711,6 +548,7 @@ func decompressData(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Close()
+	// Limit decompressed size to 4GB to prevent decompression bombs
 	limited := io.LimitReader(r, 4<<30)
 	return io.ReadAll(limited)
 }
@@ -724,26 +562,41 @@ func effectivePassword(password string, kf []byte) []byte {
 	return pw
 }
 
-// effectivePasswordV6 applies triple pre-hashing for defense-in-depth
-func effectivePasswordV6(password string, kf []byte) []byte {
+// effectivePasswordV5 pre-hashes through SHA3-512 for defense-in-depth
+func effectivePasswordV5(password string, kf []byte) []byte {
 	pw := []byte(password)
 	if len(kf) > 0 {
-		// Triple-hash key file
+		// Triple-hash key file: SHA-512 + SHA3-512 + BLAKE2b-512
 		h1 := sha512.Sum512(kf)
 		h2 := sha3.Sum512(kf)
-		b2, _ := blake2b.New512(nil)
-		b2.Write(kf)
-		h3 := b2.Sum(nil)
 		pw = append(pw, h1[:]...)
 		pw = append(pw, h2[:]...)
-		pw = append(pw, h3...)
 	}
-	// Pre-hash through SHA3-512
+	// Pre-hash entire password material through SHA3-512
 	preHash := sha3.Sum512(pw)
+	// Append pre-hash to original — attacker must invert SHA3 AND know password
 	result := make([]byte, len(pw)+64)
 	copy(result, pw)
 	copy(result[len(pw):], preHash[:])
 	return result
+}
+
+// doubleArgon2id runs Argon2id twice with split salt halves and XORs the results.
+// This doubles the computational cost for an attacker per password guess.
+func doubleArgon2id(pw, salt []byte, p argon2Params, keyLen uint32) []byte {
+	half := len(salt) / 2
+	saltA := salt[:half]
+	saltB := salt[half:]
+
+	derivedA := argon2.IDKey(pw, saltA, p.time, p.memory, p.threads, keyLen)
+	derivedB := argon2.IDKey(pw, saltB, p.time, p.memory, p.threads, keyLen)
+
+	// XOR both derivations together
+	for i := range derivedA {
+		derivedA[i] ^= derivedB[i]
+	}
+	wipeBytes(derivedB)
+	return derivedA
 }
 
 func wipeBytes(b []byte) {
@@ -788,9 +641,9 @@ func evaluatePassword(password string) (string, color.Color) {
 		return "MAXIMUM", color.RGBA{R: 0, G: 255, B: 120, A: 255}
 	case n >= 16 && cl >= 3:
 		return "Very Strong", color.RGBA{R: 0, G: 210, B: 90, A: 255}
-	case n >= 14 && cl >= 3:
+	case n >= 12 && cl >= 3:
 		return "Strong", color.RGBA{R: 120, G: 210, B: 0, A: 255}
-	case n >= 14 && cl >= 2:
+	case n >= 8 && cl >= 2:
 		return "Fair", color.RGBA{R: 255, G: 200, B: 0, A: 255}
 	default:
 		return "Weak", color.RGBA{R: 255, G: 50, B: 50, A: 255}
@@ -823,7 +676,13 @@ func generatePassword(length int, lower, upper, digits, symbols bool) string {
 }
 
 // ============================================================================
-// ENCRYPT — v6 OBSIDIAN FORMAT
+// ENCRYPT — v4 FORTRESS FORMAT
+// ============================================================================
+
+// ============================================================================
+// ENCRYPT — v5 OBSIDIAN FORMAT
+// 15-Layer Architecture: Triple S-Box, Double 64-Round Feistel,
+// 5-Cipher AEAD Cascade (AES-XChaCha-AES-XChaCha-AES), Quad Integrity
 // ============================================================================
 
 func encryptPath(path, password string, kf []byte, mode int, isFolder, compress bool, progress *widget.ProgressBar, status *widget.Label) {
@@ -883,7 +742,7 @@ func encryptPath(path, password string, kf []byte, mode int, isFolder, compress 
 	dataHash := sha256.Sum256(data)
 
 	setProgress(progress, 0.03)
-	updateStatus(status, "L2/L3: Building payload — dual canary + random padding...")
+	updateStatus(status, "L2/L3: Building payload — canary + padding...")
 
 	meta := CryptMeta{
 		Filename: origName,
@@ -892,234 +751,209 @@ func encryptPath(path, password string, kf []byte, mode int, isFolder, compress 
 		Time:     time.Now().Unix(),
 		Hash:     fmt.Sprintf("%x", dataHash),
 		IsDir:    isFolder,
-		Ver:      6,
+		Ver:      5,
 	}
 	mj, _ := json.Marshal(meta)
 
-	// Random padding (512–8192 bytes)
+	// Random padding (512–8192 bytes) — doubled from v4
 	padN, _ := rand.Int(rand.Reader, big.NewInt(7681))
 	padLen := int(padN.Int64()) + 512
 	pad := make([]byte, padLen)
 	rand.Read(pad)
 
-	// Payload: [canary 32][meta_len 4][meta_json][data][random_padding][canary 32]
+	// Payload: [canary 32][meta_len 4][meta_json][data][random_padding]
 	payload := new(bytes.Buffer)
-	payload.Write(canaryV6[:])
+	payload.Write(canaryV5[:])
 	ml := make([]byte, 4)
 	binary.BigEndian.PutUint32(ml, uint32(len(mj)))
 	payload.Write(ml)
 	payload.Write(mj)
 	payload.Write(data)
 	payload.Write(pad)
-	payload.Write(canaryV6[:])
+	// Tail canary — appended after padding for bidirectional chain verification
+	payload.Write(canaryV5[:])
 	plain := payload.Bytes()
 
 	setProgress(progress, 0.04)
-	updateStatus(status, "Generating cryptographic material (384B salt + 32B CCL seed)...")
+	updateStatus(status, "Generating 640 bytes cryptographic material...")
 
-	// Generate salts and CCL seed
-	salts := make([]byte, v6SaltSize) // 384 bytes = 3×128
-	rand.Read(salts)
-	cclSeed := make([]byte, v6CCLSeedSize)
-	rand.Read(cclSeed)
-
-	// Generate AEAD nonces
-	nonces := make([]byte, v6NonceSection)
-	rand.Read(nonces)
-	hdrPad := make([]byte, v6PadHdr)
+	salt := make([]byte, v5SaltSize)
+	rand.Read(salt)
+	nAES1 := make([]byte, nonceAES)
+	rand.Read(nAES1)
+	nAES2 := make([]byte, nonceAES)
+	rand.Read(nAES2)
+	nAES3 := make([]byte, nonceAES)
+	rand.Read(nAES3)
+	nXC1 := make([]byte, nonceXC)
+	rand.Read(nXC1)
+	nXC2 := make([]byte, nonceXC)
+	rand.Read(nXC2)
+	hdrPad := make([]byte, v5PadHdr)
 	rand.Read(hdrPad)
 
-	// Extract individual nonces for 6 AEAD passes (AES-XC-AES-XC-AES-XC)
-	nAES1 := nonces[0:12]
-	nXC1 := nonces[12:36]
-	nAES2 := nonces[36:48]
-	nXC2 := nonces[48:72]
-	nAES3 := nonces[72:84]
-	nXC3 := nonces[84:108]
-
 	setProgress(progress, 0.05)
-	params := v6ModeParams[mode]
-	totalMem := (params.argonMemory / 1024) + uint32(params.scryptN*params.scryptR*128/1024/1024)
-	updateStatus(status, fmt.Sprintf("L0: Triple KDF [%s: ~%dMB total]...", modeNames[mode], totalMem))
+	params := v5ModeParams[mode]
+	updateStatus(status, fmt.Sprintf("L0: Double Argon2id [%s: %dMB x2, %d iter x2]...", modeNames[mode], params.memory/1024, params.time))
 
-	// Derive master key via Triple KDF
-	effPw := effectivePasswordV6(password, kf)
-	masterKey := tripleKDF(effPw, salts, params, v6MaxKeySize)
+	effPw := effectivePasswordV5(password, kf)
+	derived := doubleArgon2id(effPw, salt, params, v5KeySize)
 	wipeBytes(effPw)
 
-	// Derive CCL parameters from master key + public seed
-	ccl := deriveCCLParams(masterKey, cclSeed)
+	// 20 independent sub-keys (640 bytes)
+	aesKey1 := derived[0:32]
+	xcKey1 := derived[32:64]
+	aesKey2 := derived[64:96]
+	xcKey2 := derived[96:128]
+	aesKey3 := derived[128:160]
+	hmacKey := derived[160:192]
+	sboxKey1 := derived[192:224]
+	sboxKey2 := derived[224:256]
+	sboxKey3 := derived[256:288]
+	sboxKey4 := derived[288:320]
+	diffKey := derived[320:352]
+	b2Key := derived[352:384]
+	feistelKey1 := derived[384:416]
+	feistelKey2 := derived[416:448]
+	feistelKey3 := derived[448:480]
+	sha3Key1 := derived[480:512]
+	sha3Key2 := derived[512:544]
+	fullHmacKey := derived[544:576]
+	// derived[576:640] reserved
 
-	setProgress(progress, 0.12)
-	updateStatus(status, fmt.Sprintf("CCL: %d S-Box passes, %d Feistel passes (%v rounds)", ccl.SBoxPasses, ccl.FeistelPasses, ccl.FeistelRounds))
-
-	// Allocate sub-keys using HKDF expansion
-	// Total needed: diffuse(32) + sbox×8(256) + permute(32) + feistel×6(192) + aead×6(192) + integrity×5(160) = 864
-	keyOffset := 0
-	diffKey := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-
-	sboxKeys := make([][]byte, ccl.SBoxPasses)
-	for i := 0; i < ccl.SBoxPasses; i++ {
-		sboxKeys[i] = masterKey[keyOffset : keyOffset+32]
-		keyOffset += 32
-	}
-
-	permuteKey := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-
-	feistelKeys := make([][]byte, ccl.FeistelPasses)
-	for i := 0; i < ccl.FeistelPasses; i++ {
-		feistelKeys[i] = masterKey[keyOffset : keyOffset+32]
-		keyOffset += 32
-	}
-
-	aesKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	xcKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	aesKey2 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	xcKey2 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	aesKey3 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	xcKey3 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-
-	hmacKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	b2Key := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	hmacKey2 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	hmacKey3 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	fullHmacKey := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	// Two SHAKE-256 whitening keys (pre + post CCL pipeline)
-	whitenKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	whitenKey2 := masterKey[keyOffset : keyOffset+32]
-	_ = keyOffset // no more keys needed
-
-	// ── Pre-CCL SHAKE-256 Whitening ──
-	// SHAKE-256 (Keccak XOF) stream cipher — 4th distinct cipher family.
-	// Applied before all custom CCL layers so any statistical patterns
-	// in the plaintext are destroyed before reaching S-Box/Feistel.
-	setProgress(progress, 0.14)
-	updateStatus(status, "SHAKE-256 pre-whitening (Keccak XOF)...")
-	whitened := xorWhiten(plain, whitenKey1, []byte("COSTRINITY_PRE_WHITEN_V6"))
+	// ── L4: Quadruple S-Box + Cascade Diffusion ──
+	setProgress(progress, 0.16)
+	updateStatus(status, "L4/L5: Quadruple Costrinity S-Box + cascade diffusion...")
+	transformed := costrinityTransform(plain, diffKey, true, sboxKey1, sboxKey2, sboxKey3, sboxKey4)
 	wipeBytes(plain)
 
-	// ── L4: CCL S-Box (variable passes) ──
-	setProgress(progress, 0.16)
-	updateStatus(status, fmt.Sprintf("L4/L5: CCL S-Box ×%d + cascade diffusion...", ccl.SBoxPasses))
-	transformed := costrinityTransform(whitened, diffKey, true, sboxKeys...)
-	wipeBytes(whitened)
-
-	// ── L6: Block Permutation ──
-	setProgress(progress, 0.19)
-	updateStatus(status, "L6: Block permutation (transposition)...")
-	permuted := blockPermute(transformed, permuteKey, true)
+	// ── L6: Triple 64-Round Feistel Network (192 total rounds) ──
+	setProgress(progress, 0.20)
+	updateStatus(status, "L6: Costrinity Feistel pass 1 (64 rounds)...")
+	feisteled1 := costrinityFeistel(transformed, feistelKey1, true, 64)
 	wipeBytes(transformed)
 
-	// ── L7: CCL Feistel (variable passes and rounds) ──
-	current := permuted
-	for i := 0; i < ccl.FeistelPasses; i++ {
-		setProgress(progress, 0.21+float64(i)*0.03)
-		updateStatus(status, fmt.Sprintf("L7: CCL Feistel pass %d/%d (%d rounds)...", i+1, ccl.FeistelPasses, ccl.FeistelRounds[i]))
-		next := costrinityFeistel(current, feistelKeys[i], true, ccl.FeistelRounds[i])
-		if i > 0 {
-			wipeBytes(current)
-		}
-		current = next
+	setProgress(progress, 0.25)
+	updateStatus(status, "L6: Costrinity Feistel pass 2 (64 rounds)...")
+	feisteled2 := costrinityFeistel(feisteled1, feistelKey2, true, 64)
+	wipeBytes(feisteled1)
+
+	setProgress(progress, 0.30)
+	updateStatus(status, "L6: Costrinity Feistel pass 3 (64 rounds)...")
+	feisteled3 := costrinityFeistel(feisteled2, feistelKey3, true, 64)
+	wipeBytes(feisteled2)
+
+	// ── L7: AES-256-GCM #1 ──
+	setProgress(progress, 0.35)
+	updateStatus(status, "L7: AES-256-GCM pass 1...")
+	blk1, err := aes.NewCipher(aesKey1)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		return
 	}
-	wipeBytes(permuted)
+	gcm1, err := cipher.NewGCM(blk1)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		return
+	}
+	enc1 := gcm1.Seal(nil, nAES1, feisteled3, nil)
+	wipeBytes(feisteled3)
 
-	// ── Post-CCL SHAKE-256 Whitening ──
-	// Second whitening pass after ALL custom layers.
-	// Even if an attacker somehow inverts the Feistel/S-Box layers,
-	// they still face a keyed SHAKE-256 stream cipher before the AEAD.
-	updateStatus(status, "SHAKE-256 post-whitening (Keccak XOF)...")
-	postWhitened := xorWhiten(current, whitenKey2, []byte("COSTRINITY_POST_WHITEN_V6"))
-	wipeBytes(current)
-	current = postWhitened
-
-	// ── L8-L13: Six AEAD passes (AES-XC-AES-XC-AES-XC) ──
-	setProgress(progress, 0.38)
-	updateStatus(status, "L8: AES-256-GCM pass 1...")
-	blk1, _ := aes.NewCipher(aesKey1)
-	gcm1, _ := cipher.NewGCM(blk1)
-	enc1 := gcm1.Seal(nil, nAES1, current, nil)
-	wipeBytes(current)
-
-	setProgress(progress, 0.44)
-	updateStatus(status, "L9: XChaCha20-Poly1305 pass 1...")
-	xc1, _ := chacha20poly1305.NewX(xcKey1)
+	// ── L8: XChaCha20-Poly1305 #1 ──
+	setProgress(progress, 0.42)
+	updateStatus(status, "L8: XChaCha20-Poly1305 pass 1...")
+	xc1, err := chacha20poly1305.NewX(xcKey1)
+	if err != nil {
+		notifyStatus(status, "XChaCha20 init error: "+err.Error())
+		return
+	}
 	enc2 := xc1.Seal(nil, nXC1, enc1, nil)
 	wipeBytes(enc1)
 
-	setProgress(progress, 0.50)
-	updateStatus(status, "L10: AES-256-GCM pass 2...")
-	blk2, _ := aes.NewCipher(aesKey2)
-	gcm2, _ := cipher.NewGCM(blk2)
+	// ── L9: AES-256-GCM #2 ──
+	setProgress(progress, 0.48)
+	updateStatus(status, "L9: AES-256-GCM pass 2...")
+	blk2, err := aes.NewCipher(aesKey2)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		return
+	}
+	gcm2, err := cipher.NewGCM(blk2)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		return
+	}
 	enc3 := gcm2.Seal(nil, nAES2, enc2, nil)
 	wipeBytes(enc2)
 
-	setProgress(progress, 0.56)
-	updateStatus(status, "L11: XChaCha20-Poly1305 pass 2...")
-	xc2, _ := chacha20poly1305.NewX(xcKey2)
+	// ── L10: XChaCha20-Poly1305 #2 ──
+	setProgress(progress, 0.54)
+	updateStatus(status, "L10: XChaCha20-Poly1305 pass 2...")
+	xc2, err := chacha20poly1305.NewX(xcKey2)
+	if err != nil {
+		notifyStatus(status, "XChaCha20 init error: "+err.Error())
+		return
+	}
 	enc4 := xc2.Seal(nil, nXC2, enc3, nil)
 	wipeBytes(enc3)
 
-	setProgress(progress, 0.62)
-	updateStatus(status, "L12: AES-256-GCM pass 3...")
-	blk3, _ := aes.NewCipher(aesKey3)
-	gcm3, _ := cipher.NewGCM(blk3)
-	enc5 := gcm3.Seal(nil, nAES3, enc4, nil)
+	// ── L11: AES-256-GCM #3 ──
+	setProgress(progress, 0.60)
+	updateStatus(status, "L11: AES-256-GCM pass 3...")
+	blk3, err := aes.NewCipher(aesKey3)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		return
+	}
+	gcm3, err := cipher.NewGCM(blk3)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		return
+	}
+	encPayload := gcm3.Seal(nil, nAES3, enc4, nil)
 	wipeBytes(enc4)
 
-	setProgress(progress, 0.68)
-	updateStatus(status, "L13: XChaCha20-Poly1305 pass 3...")
-	xc3, _ := chacha20poly1305.NewX(xcKey3)
-	encPayload := xc3.Seal(nil, nXC3, enc5, nil)
-	wipeBytes(enc5)
+	// ── L12: Quad Integrity ──
+	setProgress(progress, 0.66)
+	updateStatus(status, "L12: Quad integrity (SHA3 + BLAKE2b + HMAC-SHA512 + SHA3)...")
 
-	// ── L14: Quintuple Integrity ──
-	setProgress(progress, 0.74)
-	updateStatus(status, "L14: Quintuple integrity (2×SHA3 + BLAKE2b + SHA512 + full-file)...")
-
-	s3a := hmac.New(sha3.New512, hmacKey1)
+	s3a := hmac.New(sha3.New512, sha3Key1)
 	s3a.Write(encPayload)
 	sha3Sum1 := s3a.Sum(nil)
 
-	b2, _ := blake2b.New512(b2Key)
+	b2, err := blake2b.New512(b2Key)
+	if err != nil {
+		notifyStatus(status, "BLAKE2b init error: "+err.Error())
+		return
+	}
 	b2.Write(encPayload)
 	b2Sum := b2.Sum(nil)
 
-	hm := hmac.New(sha512.New, hmacKey2)
+	hm := hmac.New(sha512.New, hmacKey)
 	hm.Write(encPayload)
 	hmSum := hm.Sum(nil)
 
-	s3b := hmac.New(sha3.New512, hmacKey3)
+	s3b := hmac.New(sha3.New512, sha3Key2)
 	s3b.Write(encPayload)
 	sha3Sum2 := s3b.Sum(nil)
 
-	// ── Assemble v6 file ──
-	setProgress(progress, 0.80)
-	updateStatus(status, "Assembling .crypt v6 OBSIDIAN file...")
+	// ── Assemble v5 file ──
+	setProgress(progress, 0.72)
+	updateStatus(status, "Assembling .crypt v5 OBSIDIAN file...")
 
 	out := new(bytes.Buffer)
 	out.Write([]byte(magicString))
 	vb := make([]byte, 2)
-	binary.BigEndian.PutUint16(vb, versionV6)
+	binary.BigEndian.PutUint16(vb, versionV5)
 	out.Write(vb)
 	out.WriteByte(flags)
 	out.WriteByte(byte(mode))
-	out.Write(salts)
-	out.Write(cclSeed)
-	out.Write(nonces)
+	out.Write(salt)
+	out.Write(nAES1)
+	out.Write(nAES2)
+	out.Write(nAES3)
+	out.Write(nXC1)
+	out.Write(nXC2)
 	out.Write(hdrPad)
 	out.Write(encPayload)
 	out.Write(sha3Sum1)
@@ -1127,7 +961,8 @@ func encryptPath(path, password string, kf []byte, mode int, isFolder, compress 
 	out.Write(hmSum)
 	out.Write(sha3Sum2)
 
-	// Full-file HMAC
+	// L13: Full-file HMAC — authenticates header + payload + all other hashes
+	updateStatus(status, "L13: Full-file HMAC (header + payload authentication)...")
 	fullHm := hmac.New(sha512.New, fullHmacKey)
 	fullHm.Write(out.Bytes())
 	out.Write(fullHm.Sum(nil))
@@ -1139,10 +974,10 @@ func encryptPath(path, password string, kf []byte, mode int, isFolder, compress 
 		return
 	}
 
-	setProgress(progress, 0.90)
+	setProgress(progress, 0.85)
 	updateStatus(status, "11-pass Gutmann shredding original...")
 	secureDelete(path)
-	wipeBytes(masterKey)
+	wipeBytes(derived)
 
 	setProgress(progress, 1.0)
 	elapsed := time.Since(start).Round(time.Millisecond)
@@ -1150,16 +985,11 @@ func encryptPath(path, password string, kf []byte, mode int, isFolder, compress 
 	if origSize > 0 {
 		ratio = float64(out.Len()) / float64(origSize) * 100
 	}
-	totalRounds := 0
-	for _, r := range ccl.FeistelRounds {
-		totalRounds += r
-	}
-	notifyStatus(status, fmt.Sprintf("Encrypted [v6 %s | CCL: %dS+%dF(%dR) | %s | %.0f%%] -> %s",
-		modeNames[mode], ccl.SBoxPasses, ccl.FeistelPasses, totalRounds, elapsed, ratio, outName))
+	notifyStatus(status, fmt.Sprintf("Encrypted [v5 %s | %s | %.0f%%] -> %s", modeNames[mode], elapsed, ratio, outName))
 }
 
 // ============================================================================
-// DECRYPT — auto-detects v2/v3/v4/v5/v6
+// DECRYPT — auto-detects v2/v3/v4
 // ============================================================================
 
 func decryptFile(path, password string, kf []byte, progress *widget.ProgressBar, status *widget.Label) {
@@ -1182,8 +1012,6 @@ func decryptFile(path, password string, kf []byte, progress *widget.ProgressBar,
 	}
 	ver := binary.BigEndian.Uint16(data[4:6])
 	switch ver {
-	case versionV6:
-		decryptV6(data, path, password, kf, progress, status, start)
 	case versionV5:
 		decryptV5(data, path, password, kf, progress, status, start)
 	case versionV4:
@@ -1196,346 +1024,6 @@ func decryptFile(path, password string, kf []byte, progress *widget.ProgressBar,
 		notifyStatus(status, fmt.Sprintf("Error: unsupported version %d", ver))
 	}
 }
-
-func decryptV6(data []byte, path, password string, kf []byte, progress *widget.ProgressBar, status *widget.Label, start time.Time) {
-	if len(data) < v6HeaderSize+v6TrailingSize {
-		notifyStatus(status, "Error: file too small for v6")
-		return
-	}
-	flags := data[6]
-	mode := int(data[7])
-	if mode > ModeFortress {
-		notifyStatus(status, "Error: invalid mode")
-		return
-	}
-
-	// Parse header
-	salts := data[8 : 8+v6SaltSize]
-	cclSeed := data[8+v6SaltSize : 8+v6SaltSize+v6CCLSeedSize]
-	nonces := data[8+v6SaltSize+v6CCLSeedSize : 8+v6SaltSize+v6CCLSeedSize+v6NonceSection]
-	encPayload := data[v6HeaderSize : len(data)-v6TrailingSize]
-
-	// Parse integrity hashes
-	sha3Sum1 := data[len(data)-v6TrailingSize : len(data)-256]
-	b2Sum := data[len(data)-256 : len(data)-192]
-	hmSum := data[len(data)-192 : len(data)-128]
-	sha3Sum2 := data[len(data)-128 : len(data)-64]
-	fullHmSum := data[len(data)-64:]
-
-	// Extract nonces
-	nAES1 := nonces[0:12]
-	nXC1 := nonces[12:36]
-	nAES2 := nonces[36:48]
-	nXC2 := nonces[48:72]
-	nAES3 := nonces[72:84]
-	nXC3 := nonces[84:108]
-
-	setProgress(progress, 0.02)
-	params := v6ModeParams[mode]
-	totalMem := (params.argonMemory / 1024) + uint32(params.scryptN*params.scryptR*128/1024/1024)
-	updateStatus(status, fmt.Sprintf("L0: Triple KDF [v6 %s: ~%dMB]...", modeNames[mode], totalMem))
-
-	// Derive master key via Triple KDF
-	effPw := effectivePasswordV6(password, kf)
-	masterKey := tripleKDF(effPw, salts, params, v6MaxKeySize)
-	wipeBytes(effPw)
-
-	// Derive CCL parameters
-	ccl := deriveCCLParams(masterKey, cclSeed)
-
-	setProgress(progress, 0.10)
-	updateStatus(status, fmt.Sprintf("CCL: %d S-Box passes, %d Feistel passes", ccl.SBoxPasses, ccl.FeistelPasses))
-
-	// Allocate sub-keys
-	keyOffset := 0
-	diffKey := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-
-	sboxKeys := make([][]byte, ccl.SBoxPasses)
-	for i := 0; i < ccl.SBoxPasses; i++ {
-		sboxKeys[i] = masterKey[keyOffset : keyOffset+32]
-		keyOffset += 32
-	}
-
-	permuteKey := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-
-	feistelKeys := make([][]byte, ccl.FeistelPasses)
-	for i := 0; i < ccl.FeistelPasses; i++ {
-		feistelKeys[i] = masterKey[keyOffset : keyOffset+32]
-		keyOffset += 32
-	}
-
-	aesKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	xcKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	aesKey2 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	xcKey2 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	aesKey3 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	xcKey3 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-
-	hmacKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	b2Key := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	hmacKey2 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	hmacKey3 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	fullHmacKey := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	// Whitening keys allocated here (used after AEAD reversal)
-
-	// ── Verify full-file HMAC ──
-	setProgress(progress, 0.12)
-	updateStatus(status, "L14: Verifying full-file HMAC...")
-	fullHm := hmac.New(sha512.New, fullHmacKey)
-	fullHm.Write(data[:len(data)-64])
-	if !hmac.Equal(fullHm.Sum(nil), fullHmSum) {
-		notifyStatus(status, "FULL-FILE HMAC FAILED: header or payload tampered")
-		wipeBytes(masterKey)
-		return
-	}
-
-	// ── Verify quintuple integrity ──
-	setProgress(progress, 0.14)
-	updateStatus(status, "L14: Verifying HMAC-SHA512...")
-	hm := hmac.New(sha512.New, hmacKey2)
-	hm.Write(encPayload)
-	if !hmac.Equal(hm.Sum(nil), hmSum) {
-		notifyStatus(status, "HMAC-SHA512 FAILED: wrong password, key file, or tampered")
-		wipeBytes(masterKey)
-		return
-	}
-
-	updateStatus(status, "L14: Verifying BLAKE2b-512...")
-	b2, _ := blake2b.New512(b2Key)
-	b2.Write(encPayload)
-	if !bytes.Equal(b2.Sum(nil), b2Sum) {
-		notifyStatus(status, "BLAKE2b FAILED: corrupted")
-		wipeBytes(masterKey)
-		return
-	}
-
-	updateStatus(status, "L14: Verifying HMAC-SHA3-512 #1...")
-	s3a := hmac.New(sha3.New512, hmacKey1)
-	s3a.Write(encPayload)
-	if !hmac.Equal(s3a.Sum(nil), sha3Sum1) {
-		notifyStatus(status, "SHA3 #1 FAILED: corrupted")
-		wipeBytes(masterKey)
-		return
-	}
-
-	updateStatus(status, "L14: Verifying HMAC-SHA3-512 #2...")
-	s3b := hmac.New(sha3.New512, hmacKey3)
-	s3b.Write(encPayload)
-	if !hmac.Equal(s3b.Sum(nil), sha3Sum2) {
-		notifyStatus(status, "SHA3 #2 FAILED: corrupted")
-		wipeBytes(masterKey)
-		return
-	}
-
-	// ── Reverse AEAD cascade ──
-	setProgress(progress, 0.20)
-	updateStatus(status, "L13: Decrypting XChaCha20-Poly1305 pass 3...")
-	xc3, _ := chacha20poly1305.NewX(xcKey3)
-	dec5, err := xc3.Open(nil, nXC3, encPayload, nil)
-	if err != nil {
-		notifyStatus(status, "XChaCha20 pass 3 FAILED")
-		wipeBytes(masterKey)
-		return
-	}
-
-	setProgress(progress, 0.26)
-	updateStatus(status, "L12: Decrypting AES-256-GCM pass 3...")
-	blk3, _ := aes.NewCipher(aesKey3)
-	gcm3, _ := cipher.NewGCM(blk3)
-	dec4, err := gcm3.Open(nil, nAES3, dec5, nil)
-	if err != nil {
-		notifyStatus(status, "AES pass 3 FAILED")
-		wipeBytes(masterKey)
-		return
-	}
-	wipeBytes(dec5)
-
-	setProgress(progress, 0.32)
-	updateStatus(status, "L11: Decrypting XChaCha20-Poly1305 pass 2...")
-	xc2, _ := chacha20poly1305.NewX(xcKey2)
-	dec3, err := xc2.Open(nil, nXC2, dec4, nil)
-	if err != nil {
-		notifyStatus(status, "XChaCha20 pass 2 FAILED")
-		wipeBytes(masterKey)
-		return
-	}
-	wipeBytes(dec4)
-
-	setProgress(progress, 0.38)
-	updateStatus(status, "L10: Decrypting AES-256-GCM pass 2...")
-	blk2, _ := aes.NewCipher(aesKey2)
-	gcm2, _ := cipher.NewGCM(blk2)
-	dec2, err := gcm2.Open(nil, nAES2, dec3, nil)
-	if err != nil {
-		notifyStatus(status, "AES pass 2 FAILED")
-		wipeBytes(masterKey)
-		return
-	}
-	wipeBytes(dec3)
-
-	setProgress(progress, 0.44)
-	updateStatus(status, "L9: Decrypting XChaCha20-Poly1305 pass 1...")
-	xc1, _ := chacha20poly1305.NewX(xcKey1)
-	dec1, err := xc1.Open(nil, nXC1, dec2, nil)
-	if err != nil {
-		notifyStatus(status, "XChaCha20 pass 1 FAILED")
-		wipeBytes(masterKey)
-		return
-	}
-	wipeBytes(dec2)
-
-	setProgress(progress, 0.50)
-	updateStatus(status, "L8: Decrypting AES-256-GCM pass 1...")
-	blk1, _ := aes.NewCipher(aesKey1)
-	gcm1, _ := cipher.NewGCM(blk1)
-	feisteled, err := gcm1.Open(nil, nAES1, dec1, nil)
-	if err != nil {
-		notifyStatus(status, "AES pass 1 FAILED")
-		wipeBytes(masterKey)
-		return
-	}
-	wipeBytes(dec1)
-
-	// Whitening keys — same positions as in encrypt
-	whitenKey1 := masterKey[keyOffset : keyOffset+32]
-	keyOffset += 32
-	whitenKey2 := masterKey[keyOffset : keyOffset+32]
-	_ = keyOffset
-
-	// ── Reverse post-CCL SHAKE-256 whitening ──
-	setProgress(progress, 0.52)
-	updateStatus(status, "Reversing SHAKE-256 post-whitening...")
-	unpostWhitened := xorWhiten(feisteled, whitenKey2, []byte("COSTRINITY_POST_WHITEN_V6"))
-	wipeBytes(feisteled)
-
-	// ── Reverse CCL Feistel passes ──
-	current := unpostWhitened
-	for i := ccl.FeistelPasses - 1; i >= 0; i-- {
-		setProgress(progress, 0.54+float64(ccl.FeistelPasses-1-i)*0.03)
-		updateStatus(status, fmt.Sprintf("L7: Reversing CCL Feistel pass %d/%d (%d rounds)...", ccl.FeistelPasses-i, ccl.FeistelPasses, ccl.FeistelRounds[i]))
-		next := costrinityFeistel(current, feistelKeys[i], false, ccl.FeistelRounds[i])
-		if i < ccl.FeistelPasses-1 {
-			wipeBytes(current)
-		}
-		current = next
-	}
-	wipeBytes(unpostWhitened)
-
-	// ── Reverse block permutation ──
-	setProgress(progress, 0.68)
-	updateStatus(status, "L6: Reversing block permutation...")
-	unpermuted := blockPermute(current, permuteKey, false)
-	wipeBytes(current)
-
-	// ── Reverse S-Box ──
-	setProgress(progress, 0.72)
-	updateStatus(status, fmt.Sprintf("L4/L5: Reversing CCL S-Box ×%d + cascade diffusion...", ccl.SBoxPasses))
-	postUnwhitened := costrinityTransform(unpermuted, diffKey, false, sboxKeys...)
-	wipeBytes(unpermuted)
-
-	// ── Reverse pre-CCL SHAKE-256 whitening ──
-	setProgress(progress, 0.75)
-	updateStatus(status, "Reversing SHAKE-256 pre-whitening...")
-	plain := xorWhiten(postUnwhitened, whitenKey1, []byte("COSTRINITY_PRE_WHITEN_V6"))
-	wipeBytes(postUnwhitened)
-
-	// ── Verify canaries ──
-	setProgress(progress, 0.78)
-	updateStatus(status, "L2: Verifying dual canaries...")
-	if len(plain) < canarySize*2 {
-		notifyStatus(status, "Error: payload too small")
-		wipeBytes(masterKey)
-		return
-	}
-	if !bytes.Equal(plain[:canarySize], canaryV6[:]) {
-		notifyStatus(status, "HEAD CANARY FAILED: cipher chain compromised")
-		wipeBytes(masterKey)
-		return
-	}
-	if !bytes.Equal(plain[len(plain)-canarySize:], canaryV6[:]) {
-		notifyStatus(status, "TAIL CANARY FAILED: cipher chain compromised")
-		wipeBytes(masterKey)
-		return
-	}
-
-	rest := plain[canarySize : len(plain)-canarySize]
-
-	if len(rest) < 4 {
-		notifyStatus(status, "Error: payload corrupt")
-		wipeBytes(masterKey)
-		return
-	}
-	metaLen := int(binary.BigEndian.Uint32(rest[0:4]))
-	if metaLen < 0 || metaLen > len(rest)-4 {
-		notifyStatus(status, "Error: metadata corrupt")
-		wipeBytes(masterKey)
-		return
-	}
-	var meta CryptMeta
-	if err := json.Unmarshal(rest[4:4+metaLen], &meta); err != nil {
-		notifyStatus(status, "Metadata error: "+err.Error())
-		wipeBytes(masterKey)
-		return
-	}
-
-	dataStart := 4 + metaLen
-	if meta.DataSize < 0 || int64(meta.DataSize) > int64(len(rest)-dataStart) {
-		notifyStatus(status, "Error: data size exceeds payload")
-		wipeBytes(masterKey)
-		return
-	}
-	fileData := rest[dataStart : dataStart+int(meta.DataSize)]
-
-	dh := sha256.Sum256(fileData)
-	if fmt.Sprintf("%x", dh) != meta.Hash {
-		updateStatus(status, "Warning: payload hash mismatch")
-	}
-
-	if flags&flagCompressed != 0 {
-		setProgress(progress, 0.82)
-		updateStatus(status, "L1: Decompressing...")
-		fileData, err = decompressData(fileData)
-		if err != nil {
-			notifyStatus(status, "Decompress error: "+err.Error())
-			wipeBytes(masterKey)
-			return
-		}
-	}
-
-	setProgress(progress, 0.88)
-	restoreFile(meta, fileData, status)
-
-	setProgress(progress, 0.94)
-	updateStatus(status, "11-pass shredding encrypted file...")
-	secureDelete(path)
-	wipeBytes(masterKey)
-
-	setProgress(progress, 1.0)
-	elapsed := time.Since(start).Round(time.Millisecond)
-	totalRounds := 0
-	for _, r := range ccl.FeistelRounds {
-		totalRounds += r
-	}
-	notifyStatus(status, fmt.Sprintf("Decrypted [v6 %s | CCL: %dS+%dF(%dR) | %s] -> %s",
-		modeNames[mode], ccl.SBoxPasses, ccl.FeistelPasses, totalRounds, elapsed, meta.Filename))
-}
-
-// ============================================================================
-// BACKWARD COMPAT DECRYPTORS (v5/v4/v3/v2)
-// ============================================================================
 
 func decryptV5(data []byte, path, password string, kf []byte, progress *widget.ProgressBar, status *widget.Label, start time.Time) {
 	if len(data) < v5HeaderSize+v5TrailingSize {
@@ -1563,21 +1051,13 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 
 	setProgress(progress, 0.02)
 	params := v5ModeParams[mode]
-	updateStatus(status, fmt.Sprintf("L0: Double Argon2id [v5 %s: %dMB x2]...", modeNames[mode], params.memory/1024))
+	updateStatus(status, fmt.Sprintf("L0: Double Argon2id [v5 %s: %dMB x2, %d iter x2]...", modeNames[mode], params.memory/1024, params.time))
 
-	effPw := effectivePasswordV6(password, kf)
-	half := len(salt) / 2
-	saltA := salt[:half]
-	saltB := salt[half:]
-	derivedA := argon2.IDKey(effPw, saltA, params.time, params.memory, params.threads, v5KeySize)
-	derivedB := argon2.IDKey(effPw, saltB, params.time, params.memory, params.threads, v5KeySize)
-	for i := range derivedA {
-		derivedA[i] ^= derivedB[i]
-	}
-	derived := derivedA
-	wipeBytes(derivedB)
+	effPw := effectivePasswordV5(password, kf)
+	derived := doubleArgon2id(effPw, salt, params, v5KeySize)
 	wipeBytes(effPw)
 
+	// 20 independent sub-keys (640 bytes)
 	aesKey1 := derived[0:32]
 	xcKey1 := derived[32:64]
 	aesKey2 := derived[64:96]
@@ -1597,51 +1077,75 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 	sha3Key2 := derived[512:544]
 	fullHmacKey := derived[544:576]
 
+	// ── L13: Verify full-file HMAC (header + payload + other hashes) ──
 	setProgress(progress, 0.12)
 	updateStatus(status, "L13: Verifying full-file HMAC...")
 	fullHm := hmac.New(sha512.New, fullHmacKey)
-	fullHm.Write(data[:len(data)-64])
+	fullHm.Write(data[:len(data)-64]) // everything except the full-file HMAC itself
 	if !hmac.Equal(fullHm.Sum(nil), fullHmSum) {
-		notifyStatus(status, "FULL-FILE HMAC FAILED")
+		notifyStatus(status, "FULL-FILE HMAC FAILED: header or payload tampered")
 		wipeBytes(derived)
 		return
 	}
 
+	// ── L12: Verify quad integrity ──
+	setProgress(progress, 0.14)
+	updateStatus(status, "L12: Verifying HMAC-SHA512...")
 	hm := hmac.New(sha512.New, hmacKey)
 	hm.Write(encPayload)
 	if !hmac.Equal(hm.Sum(nil), hmSum) {
-		notifyStatus(status, "HMAC-SHA512 FAILED")
+		notifyStatus(status, "HMAC-SHA512 FAILED: wrong password, key file, or tampered")
 		wipeBytes(derived)
 		return
 	}
 
-	b2, _ := blake2b.New512(b2Key)
+	updateStatus(status, "L12: Verifying BLAKE2b-512...")
+	b2, err := blake2b.New512(b2Key)
+	if err != nil {
+		notifyStatus(status, "BLAKE2b init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	b2.Write(encPayload)
 	if !bytes.Equal(b2.Sum(nil), b2Sum) {
-		notifyStatus(status, "BLAKE2b FAILED")
+		notifyStatus(status, "BLAKE2b FAILED: corrupted")
 		wipeBytes(derived)
 		return
 	}
 
+	updateStatus(status, "L12: Verifying HMAC-SHA3-512 #1...")
 	s3a := hmac.New(sha3.New512, sha3Key1)
 	s3a.Write(encPayload)
 	if !hmac.Equal(s3a.Sum(nil), sha3Sum1) {
-		notifyStatus(status, "SHA3 #1 FAILED")
+		notifyStatus(status, "SHA3 #1 FAILED: corrupted")
 		wipeBytes(derived)
 		return
 	}
 
+	updateStatus(status, "L12: Verifying HMAC-SHA3-512 #2...")
 	s3b := hmac.New(sha3.New512, sha3Key2)
 	s3b.Write(encPayload)
 	if !hmac.Equal(s3b.Sum(nil), sha3Sum2) {
-		notifyStatus(status, "SHA3 #2 FAILED")
+		notifyStatus(status, "SHA3 #2 FAILED: corrupted")
 		wipeBytes(derived)
 		return
 	}
 
+	// ── L11: AES-256-GCM #3 (reverse) ──
 	setProgress(progress, 0.20)
-	blk3, _ := aes.NewCipher(aesKey3)
-	gcm3, _ := cipher.NewGCM(blk3)
+	updateStatus(status, "L11: Decrypting AES-256-GCM pass 3...")
+	blk3, err := aes.NewCipher(aesKey3)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
+	gcm3, err := cipher.NewGCM(blk3)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	enc4, err := gcm3.Open(nil, nAES3, encPayload, nil)
 	if err != nil {
 		notifyStatus(status, "AES pass 3 FAILED")
@@ -1649,7 +1153,15 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 
-	xc2, _ := chacha20poly1305.NewX(xcKey2)
+	// ── L10: XChaCha20-Poly1305 #2 (reverse) ──
+	setProgress(progress, 0.26)
+	updateStatus(status, "L10: Decrypting XChaCha20-Poly1305 pass 2...")
+	xc2, err := chacha20poly1305.NewX(xcKey2)
+	if err != nil {
+		notifyStatus(status, "XChaCha20 init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	enc3, err := xc2.Open(nil, nXC2, enc4, nil)
 	if err != nil {
 		notifyStatus(status, "XChaCha20 pass 2 FAILED")
@@ -1658,8 +1170,21 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 	}
 	wipeBytes(enc4)
 
-	blk2, _ := aes.NewCipher(aesKey2)
-	gcm2, _ := cipher.NewGCM(blk2)
+	// ── L9: AES-256-GCM #2 (reverse) ──
+	setProgress(progress, 0.32)
+	updateStatus(status, "L9: Decrypting AES-256-GCM pass 2...")
+	blk2, err := aes.NewCipher(aesKey2)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
+	gcm2, err := cipher.NewGCM(blk2)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	enc2, err := gcm2.Open(nil, nAES2, enc3, nil)
 	if err != nil {
 		notifyStatus(status, "AES pass 2 FAILED")
@@ -1668,7 +1193,15 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 	}
 	wipeBytes(enc3)
 
-	xc1, _ := chacha20poly1305.NewX(xcKey1)
+	// ── L8: XChaCha20-Poly1305 #1 (reverse) ──
+	setProgress(progress, 0.38)
+	updateStatus(status, "L8: Decrypting XChaCha20-Poly1305 pass 1...")
+	xc1, err := chacha20poly1305.NewX(xcKey1)
+	if err != nil {
+		notifyStatus(status, "XChaCha20 init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	enc1, err := xc1.Open(nil, nXC1, enc2, nil)
 	if err != nil {
 		notifyStatus(status, "XChaCha20 pass 1 FAILED")
@@ -1677,8 +1210,21 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 	}
 	wipeBytes(enc2)
 
-	blk1, _ := aes.NewCipher(aesKey1)
-	gcm1, _ := cipher.NewGCM(blk1)
+	// ── L7: AES-256-GCM #1 (reverse) ──
+	setProgress(progress, 0.44)
+	updateStatus(status, "L7: Decrypting AES-256-GCM pass 1...")
+	blk1, err := aes.NewCipher(aesKey1)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
+	gcm1, err := cipher.NewGCM(blk1)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	feisteled3, err := gcm1.Open(nil, nAES1, enc1, nil)
 	if err != nil {
 		notifyStatus(status, "AES pass 1 FAILED")
@@ -1687,34 +1233,52 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 	}
 	wipeBytes(enc1)
 
+	// ── L6: Reverse triple 64-round Feistel (192 rounds) ──
 	setProgress(progress, 0.50)
+	updateStatus(status, "L6: Reversing 64-round Feistel pass 3...")
 	feisteled2 := costrinityFeistel(feisteled3, feistelKey3, false, 64)
 	wipeBytes(feisteled3)
+
+	setProgress(progress, 0.55)
+	updateStatus(status, "L6: Reversing 64-round Feistel pass 2...")
 	feisteled1 := costrinityFeistel(feisteled2, feistelKey2, false, 64)
 	wipeBytes(feisteled2)
+
+	setProgress(progress, 0.60)
+	updateStatus(status, "L6: Reversing 64-round Feistel pass 1...")
 	transformed := costrinityFeistel(feisteled1, feistelKey1, false, 64)
 	wipeBytes(feisteled1)
 
+	// ── L4/L5: Reverse quadruple S-Box + diffusion ──
+	setProgress(progress, 0.66)
+	updateStatus(status, "L4/L5: Reversing quadruple S-Box + cascade diffusion...")
 	plain := costrinityTransform(transformed, diffKey, false, sboxKey1, sboxKey2, sboxKey3, sboxKey4)
 	wipeBytes(transformed)
 
+	// ── L2: Verify head canary ──
+	setProgress(progress, 0.70)
+	updateStatus(status, "L2: Verifying head canary...")
 	if len(plain) < canarySize*2 {
 		notifyStatus(status, "Error: payload too small")
 		wipeBytes(derived)
 		return
 	}
 	if !bytes.Equal(plain[:canarySize], canaryV5[:]) {
-		notifyStatus(status, "HEAD CANARY FAILED")
-		wipeBytes(derived)
-		return
-	}
-	if !bytes.Equal(plain[len(plain)-canarySize:], canaryV5[:]) {
-		notifyStatus(status, "TAIL CANARY FAILED")
+		notifyStatus(status, "HEAD CANARY FAILED: cipher chain compromised")
 		wipeBytes(derived)
 		return
 	}
 
-	rest := plain[canarySize : len(plain)-canarySize]
+	// Verify tail canary
+	updateStatus(status, "L2: Verifying tail canary...")
+	if !bytes.Equal(plain[len(plain)-canarySize:], canaryV5[:]) {
+		notifyStatus(status, "TAIL CANARY FAILED: cipher chain compromised")
+		wipeBytes(derived)
+		return
+	}
+
+	rest := plain[canarySize : len(plain)-canarySize] // strip both canaries
+
 	if len(rest) < 4 {
 		notifyStatus(status, "Error: payload corrupt")
 		wipeBytes(derived)
@@ -1741,7 +1305,14 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 	}
 	fileData := rest[dataStart : dataStart+int(meta.DataSize)]
 
+	dh := sha256.Sum256(fileData)
+	if fmt.Sprintf("%x", dh) != meta.Hash {
+		updateStatus(status, "Warning: payload hash mismatch")
+	}
+
 	if flags&flagCompressed != 0 {
+		setProgress(progress, 0.78)
+		updateStatus(status, "L1: Decompressing...")
 		fileData, err = decompressData(fileData)
 		if err != nil {
 			notifyStatus(status, "Decompress error: "+err.Error())
@@ -1750,11 +1321,17 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 		}
 	}
 
+	setProgress(progress, 0.84)
 	restoreFile(meta, fileData, status)
+
+	setProgress(progress, 0.90)
+	updateStatus(status, "11-pass shredding encrypted file...")
 	secureDelete(path)
 	wipeBytes(derived)
+
 	setProgress(progress, 1.0)
-	notifyStatus(status, fmt.Sprintf("Decrypted [v5 %s | %s] -> %s", modeNames[mode], time.Since(start).Round(time.Millisecond), meta.Filename))
+	elapsed := time.Since(start).Round(time.Millisecond)
+	notifyStatus(status, fmt.Sprintf("Decrypted [v5 %s | %s] -> %s", modeNames[mode], elapsed, meta.Filename))
 }
 
 func decryptV4(data []byte, path, password string, kf []byte, progress *widget.ProgressBar, status *widget.Label, start time.Time) {
@@ -1797,33 +1374,52 @@ func decryptV4(data []byte, path, password string, kf []byte, progress *widget.P
 	sha3Key := derived[288:320]
 
 	setProgress(progress, 0.22)
+	updateStatus(status, "L10: Verifying HMAC-SHA512...")
 	hm := hmac.New(sha512.New, hmacKey)
 	hm.Write(encPayload)
 	if !hmac.Equal(hm.Sum(nil), hmSum) {
-		notifyStatus(status, "HMAC-SHA512 FAILED")
+		notifyStatus(status, "HMAC-SHA512 FAILED: wrong password, key file, or tampered")
 		wipeBytes(derived)
 		return
 	}
 
-	b2, _ := blake2b.New512(b2Key)
+	updateStatus(status, "L10: Verifying BLAKE2b-512...")
+	b2, err := blake2b.New512(b2Key)
+	if err != nil {
+		notifyStatus(status, "BLAKE2b init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	b2.Write(encPayload)
 	if !bytes.Equal(b2.Sum(nil), b2Sum) {
-		notifyStatus(status, "BLAKE2b FAILED")
+		notifyStatus(status, "BLAKE2b FAILED: corrupted")
 		wipeBytes(derived)
 		return
 	}
 
+	updateStatus(status, "L10: Verifying HMAC-SHA3-512...")
 	s3 := hmac.New(sha3.New512, sha3Key)
 	s3.Write(encPayload)
 	if !hmac.Equal(s3.Sum(nil), sha3Sum) {
-		notifyStatus(status, "SHA3 FAILED")
+		notifyStatus(status, "SHA3 FAILED: corrupted")
 		wipeBytes(derived)
 		return
 	}
 
 	setProgress(progress, 0.30)
-	blk2, _ := aes.NewCipher(aesKey2)
-	gcm2, _ := cipher.NewGCM(blk2)
+	updateStatus(status, "L9: Decrypting AES-256-GCM pass 2...")
+	blk2, err := aes.NewCipher(aesKey2)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
+	gcm2, err := cipher.NewGCM(blk2)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	enc2, err := gcm2.Open(nil, nAES2, encPayload, nil)
 	if err != nil {
 		notifyStatus(status, "AES pass 2 FAILED")
@@ -1831,7 +1427,14 @@ func decryptV4(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 
-	xc, _ := chacha20poly1305.NewX(xcKey)
+	setProgress(progress, 0.38)
+	updateStatus(status, "L8: Decrypting XChaCha20-Poly1305...")
+	xc, err := chacha20poly1305.NewX(xcKey)
+	if err != nil {
+		notifyStatus(status, "XChaCha20 init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	enc1, err := xc.Open(nil, nXC, enc2, nil)
 	if err != nil {
 		notifyStatus(status, "XChaCha20 FAILED")
@@ -1839,8 +1442,20 @@ func decryptV4(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 
-	blk1, _ := aes.NewCipher(aesKey1)
-	gcm1, _ := cipher.NewGCM(blk1)
+	setProgress(progress, 0.46)
+	updateStatus(status, "L7: Decrypting AES-256-GCM pass 1...")
+	blk1, err := aes.NewCipher(aesKey1)
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
+	gcm1, err := cipher.NewGCM(blk1)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	feisteled, err := gcm1.Open(nil, nAES1, enc1, nil)
 	if err != nil {
 		notifyStatus(status, "AES pass 1 FAILED")
@@ -1849,15 +1464,21 @@ func decryptV4(data []byte, path, password string, kf []byte, progress *widget.P
 	}
 
 	setProgress(progress, 0.54)
+	updateStatus(status, "L6: Reversing 32-round Feistel...")
 	transformed := costrinityFeistel(feisteled, feistelKey, false, 32)
+
+	setProgress(progress, 0.62)
+	updateStatus(status, "L4/L5: Reversing double S-Box + diffusion...")
 	plain := costrinityTransform(transformed, diffKey, false, sboxKey1, sboxKey2)
 
+	setProgress(progress, 0.68)
+	updateStatus(status, "L2: Verifying cipher chain canary...")
 	if len(plain) < canarySize {
 		notifyStatus(status, "Error: payload too small")
 		return
 	}
 	if !bytes.Equal(plain[:canarySize], canaryValue[:]) {
-		notifyStatus(status, "CANARY FAILED")
+		notifyStatus(status, "CANARY FAILED: cipher chain compromised — data integrity breach detected")
 		return
 	}
 	rest := plain[canarySize:]
@@ -1884,7 +1505,16 @@ func decryptV4(data []byte, path, password string, kf []byte, progress *widget.P
 	}
 	fileData := rest[dataStart : dataStart+int(meta.DataSize)]
 
+	// Verify payload hash
+	dh := sha256.Sum256(fileData)
+	if fmt.Sprintf("%x", dh) != meta.Hash {
+		updateStatus(status, "Warning: payload hash mismatch")
+	}
+
+	// L1: Decompress
 	if flags&flagCompressed != 0 {
+		setProgress(progress, 0.75)
+		updateStatus(status, "L1: Decompressing...")
 		fileData, err = decompressData(fileData)
 		if err != nil {
 			notifyStatus(status, "Decompress error: "+err.Error())
@@ -1892,12 +1522,20 @@ func decryptV4(data []byte, path, password string, kf []byte, progress *widget.P
 		}
 	}
 
+	setProgress(progress, 0.80)
 	restoreFile(meta, fileData, status)
+
+	setProgress(progress, 0.88)
+	updateStatus(status, "7-pass shredding encrypted file...")
 	secureDelete(path)
 	wipeBytes(derived)
+
 	setProgress(progress, 1.0)
-	notifyStatus(status, fmt.Sprintf("Decrypted [v4 %s | %s] -> %s", modeNames[mode], time.Since(start).Round(time.Millisecond), meta.Filename))
+	elapsed := time.Since(start).Round(time.Millisecond)
+	notifyStatus(status, fmt.Sprintf("Decrypted [v4 %s | %s] -> %s", modeNames[mode], elapsed, meta.Filename))
 }
+
+// ── v3 backward compat ──
 
 func decryptV3(data []byte, path, password string, kf []byte, progress *widget.ProgressBar, status *widget.Label, start time.Time) {
 	if len(data) < v3HeaderSize+v3TrailingSize {
@@ -1918,6 +1556,7 @@ func decryptV3(data []byte, path, password string, kf []byte, progress *widget.P
 	hmSum := data[len(data)-64:]
 
 	params := modeParams[mode]
+	updateStatus(status, fmt.Sprintf("L0: Argon2id [v3 %s]...", modeNames[mode]))
 	effPw := effectivePassword(password, kf)
 	derived := argon2.IDKey(effPw, salt, params.time, params.memory, params.threads, v3KeySize)
 	wipeBytes(effPw)
@@ -1928,6 +1567,7 @@ func decryptV3(data []byte, path, password string, kf []byte, progress *widget.P
 	b2Key := derived[160:192]
 	feistelKey := derived[192:224]
 
+	setProgress(progress, 0.25)
 	hm := hmac.New(sha512.New, hmacKeyD)
 	hm.Write(encPayload)
 	if !hmac.Equal(hm.Sum(nil), hmSum) {
@@ -1935,7 +1575,12 @@ func decryptV3(data []byte, path, password string, kf []byte, progress *widget.P
 		wipeBytes(derived)
 		return
 	}
-	b2h, _ := blake2b.New512(b2Key)
+	b2h, err := blake2b.New512(b2Key)
+	if err != nil {
+		notifyStatus(status, "BLAKE2b init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	b2h.Write(encPayload)
 	if !bytes.Equal(b2h.Sum(nil), b2sum) {
 		notifyStatus(status, "BLAKE2b FAILED")
@@ -1943,15 +1588,31 @@ func decryptV3(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 
-	xc, _ := chacha20poly1305.NewX(derived[32:64])
+	setProgress(progress, 0.35)
+	xc, err := chacha20poly1305.NewX(derived[32:64])
+	if err != nil {
+		notifyStatus(status, "XChaCha20 init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	aesEnc, err := xc.Open(nil, nXC, encPayload, nil)
 	if err != nil {
 		notifyStatus(status, "XChaCha20 FAILED")
 		wipeBytes(derived)
 		return
 	}
-	blk, _ := aes.NewCipher(derived[0:32])
-	gcm, _ := cipher.NewGCM(blk)
+	blk, err := aes.NewCipher(derived[0:32])
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
+	gcm, err := cipher.NewGCM(blk)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	feisteled, err := gcm.Open(nil, nAES, aesEnc, nil)
 	if err != nil {
 		notifyStatus(status, "AES-GCM FAILED")
@@ -1959,6 +1620,7 @@ func decryptV3(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 
+	setProgress(progress, 0.55)
 	transformed := costrinityFeistel(feisteled, feistelKey, false, 16)
 	plain := costrinityTransform(transformed, diffKey, false, sboxKey)
 
@@ -1990,12 +1652,15 @@ func decryptV3(data []byte, path, password string, kf []byte, progress *widget.P
 		}
 	}
 
+	setProgress(progress, 0.80)
 	restoreFile(meta, fileData, status)
 	secureDelete(path)
 	wipeBytes(derived)
 	setProgress(progress, 1.0)
 	notifyStatus(status, fmt.Sprintf("Decrypted [v3 | %s] -> %s", time.Since(start).Round(time.Millisecond), meta.Filename))
 }
+
+// ── v2 backward compat ──
 
 func decryptV2(data []byte, path, password string, kf []byte, progress *widget.ProgressBar, status *widget.Label, start time.Time) {
 	if len(data) < v2HeaderSize+v2TrailingSize {
@@ -2015,6 +1680,7 @@ func decryptV2(data []byte, path, password string, kf []byte, progress *widget.P
 	hmSum := data[len(data)-64:]
 
 	params := modeParams[mode]
+	updateStatus(status, fmt.Sprintf("Argon2id [v2 %s]...", modeNames[mode]))
 	effPw := effectivePassword(password, kf)
 	derived := argon2.IDKey(effPw, salt, params.time, params.memory, params.threads, v2KeySize)
 	wipeBytes(effPw)
@@ -2031,7 +1697,12 @@ func decryptV2(data []byte, path, password string, kf []byte, progress *widget.P
 		wipeBytes(derived)
 		return
 	}
-	b2h, _ := blake2b.New512(b2Key)
+	b2h, err := blake2b.New512(b2Key)
+	if err != nil {
+		notifyStatus(status, "BLAKE2b init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	b2h.Write(encPayload)
 	if !bytes.Equal(b2h.Sum(nil), b2sum) {
 		notifyStatus(status, "BLAKE2b FAILED")
@@ -2039,15 +1710,30 @@ func decryptV2(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 
-	xc, _ := chacha20poly1305.NewX(derived[32:64])
+	xc, err := chacha20poly1305.NewX(derived[32:64])
+	if err != nil {
+		notifyStatus(status, "XChaCha20 init error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	aesEnc, err := xc.Open(nil, nXC, encPayload, nil)
 	if err != nil {
 		notifyStatus(status, "XChaCha20 FAILED")
 		wipeBytes(derived)
 		return
 	}
-	blk, _ := aes.NewCipher(derived[0:32])
-	gcm, _ := cipher.NewGCM(blk)
+	blk, err := aes.NewCipher(derived[0:32])
+	if err != nil {
+		notifyStatus(status, "AES cipher error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
+	gcm, err := cipher.NewGCM(blk)
+	if err != nil {
+		notifyStatus(status, "GCM error: "+err.Error())
+		wipeBytes(derived)
+		return
+	}
 	transformed, err := gcm.Open(nil, nAES, aesEnc, nil)
 	if err != nil {
 		notifyStatus(status, "AES-GCM FAILED")
@@ -2108,50 +1794,128 @@ func verifyFile(path, password string, kf []byte, progress *widget.ProgressBar, 
 
 	var mode int
 	var flags byte
-	var hmSum []byte
-	var hmacKey []byte
+	var salt, encPayload, hmSum []byte
+	var kSz uint32
+	isV5 := false
 
 	switch ver {
-	case versionV6:
-		if len(data) < v6HeaderSize+v6TrailingSize {
+	case versionV5:
+		if len(data) < v5HeaderSize+v5TrailingSize {
 			notifyStatus(status, "Error: too small")
 			return
 		}
 		flags = data[6]
 		mode = int(data[7])
-		salts := data[8 : 8+v6SaltSize]
-		cclSeed := data[8+v6SaltSize : 8+v6SaltSize+v6CCLSeedSize]
-		encPayload := data[v6HeaderSize : len(data)-v6TrailingSize]
-		hmSum = data[len(data)-192 : len(data)-128]
-
-		params := v6ModeParams[mode]
-		effPw := effectivePasswordV6(password, kf)
-		masterKey := tripleKDF(effPw, salts, params, v6MaxKeySize)
-		wipeBytes(effPw)
-
-		ccl := deriveCCLParams(masterKey, cclSeed)
-		// diffKey(32) + sboxKeys + permuteKey(32) + feistelKeys + AEAD×6(192) + hmacKey1(32) + b2Key(32)
-		keyOffset := 32 + ccl.SBoxPasses*32 + 32 + ccl.FeistelPasses*32 + 6*32 + 32 + 32
-		hmacKey = masterKey[keyOffset : keyOffset+32]
-
-		setProgress(progress, 0.6)
-		hm := hmac.New(sha512.New, hmacKey)
-		hm.Write(encPayload)
-		ok := hmac.Equal(hm.Sum(nil), hmSum)
-		wipeBytes(masterKey)
-		setProgress(progress, 1.0)
-		elapsed := time.Since(start).Round(time.Millisecond)
-		info := fmt.Sprintf("v6 | %s | CCL | %.1f KB", modeNames[mode], float64(len(data))/1024)
-		if ok {
-			notifyStatus(status, fmt.Sprintf("VERIFIED OK (%s) [%s]", elapsed, info))
-		} else {
-			notifyStatus(status, fmt.Sprintf("VERIFICATION FAILED (%s) [%s]", elapsed, info))
+		if mode > ModeFortress {
+			notifyStatus(status, "Error: invalid mode")
+			return
 		}
-		return
-
+		salt = data[8:264]
+		encPayload = data[v5HeaderSize : len(data)-v5TrailingSize]
+		hmSum = data[len(data)-192 : len(data)-128] // HMAC-SHA512 is 3rd of 5
+		kSz = v5KeySize
+		isV5 = true
+	case versionV4:
+		if len(data) < v4HeaderSize+v4TrailingSize {
+			notifyStatus(status, "Error: too small")
+			return
+		}
+		flags = data[6]
+		mode = int(data[7])
+		if mode > ModeFortress {
+			notifyStatus(status, "Error: invalid mode")
+			return
+		}
+		salt = data[8:136]
+		encPayload = data[v4HeaderSize : len(data)-v4TrailingSize]
+		hmSum = data[len(data)-64:]
+		kSz = v4KeySize
+	case versionV3:
+		if len(data) < v3HeaderSize+v3TrailingSize {
+			notifyStatus(status, "Error: too small")
+			return
+		}
+		flags = data[6]
+		mode = int(data[7])
+		if mode > ModeFortress {
+			notifyStatus(status, "Error: invalid mode")
+			return
+		}
+		salt = data[8:72]
+		encPayload = data[v3HeaderSize : len(data)-v3TrailingSize]
+		hmSum = data[len(data)-64:]
+		kSz = v3KeySize
+	case versionV2:
+		if len(data) < v2HeaderSize+v2TrailingSize {
+			notifyStatus(status, "Error: too small")
+			return
+		}
+		mode = int(data[6])
+		if mode > ModeFortress {
+			notifyStatus(status, "Error: invalid mode")
+			return
+		}
+		salt = data[7:71]
+		encPayload = data[v2HeaderSize : len(data)-v2TrailingSize]
+		hmSum = data[len(data)-64:]
+		kSz = v2KeySize
 	default:
-		notifyStatus(status, fmt.Sprintf("Verify not implemented for v%d — use decrypt", ver))
+		notifyStatus(status, fmt.Sprintf("Error: version %d unsupported", ver))
 		return
+	}
+
+	setProgress(progress, 0.1)
+	var params argon2Params
+	if isV5 {
+		params = v5ModeParams[mode]
+	} else {
+		params = modeParams[mode]
+	}
+	updateStatus(status, fmt.Sprintf("Deriving keys [v%d %s]...", ver, modeNames[mode]))
+
+	var derived []byte
+	if isV5 {
+		effPw := effectivePasswordV5(password, kf)
+		derived = doubleArgon2id(effPw, salt, params, kSz)
+		wipeBytes(effPw)
+	} else {
+		effPw := effectivePassword(password, kf)
+		derived = argon2.IDKey(effPw, salt, params.time, params.memory, params.threads, kSz)
+		wipeBytes(effPw)
+	}
+
+	var hmacKeyD []byte
+	switch {
+	case isV5:
+		hmacKeyD = derived[160:192] // v5: key slot 5
+	case ver == versionV2 || ver == versionV3:
+		hmacKeyD = derived[64:96]
+	default:
+		hmacKeyD = derived[96:128] // v4
+	}
+
+	setProgress(progress, 0.6)
+	updateStatus(status, "Verifying HMAC-SHA512...")
+	hm := hmac.New(sha512.New, hmacKeyD)
+	hm.Write(encPayload)
+	ok := hmac.Equal(hm.Sum(nil), hmSum)
+
+	wipeBytes(derived)
+	setProgress(progress, 1.0)
+	elapsed := time.Since(start).Round(time.Millisecond)
+
+	info := fmt.Sprintf("v%d | %s | %.1f KB", ver, modeNames[mode], float64(len(data))/1024)
+	if flags&flagCompressed != 0 {
+		info += " | Compressed"
+	}
+	if flags&flagKeyFile != 0 {
+		info += " | Key File"
+	}
+
+	if ok {
+		notifyStatus(status, fmt.Sprintf("VERIFIED OK (%s) [%s]", elapsed, info))
+	} else {
+		notifyStatus(status, fmt.Sprintf("VERIFICATION FAILED (%s) [%s]", elapsed, info))
 	}
 }
 
@@ -2208,6 +1972,7 @@ func unzipToDesktop(data []byte, folderName string) error {
 	dest := filepath.Join(getDesktopPath(), folderName)
 	os.MkdirAll(dest, 0755)
 	for _, f := range r.File {
+		// Zip Slip protection: reject entries that escape the destination
 		cleaned := filepath.FromSlash(f.Name)
 		if strings.Contains(cleaned, "..") {
 			return fmt.Errorf("invalid zip entry path: %s", f.Name)
@@ -2230,6 +1995,7 @@ func unzipToDesktop(data []byte, folderName string) error {
 			df.Close()
 			return err
 		}
+		// Limit extraction to 4GB per file to prevent decompression bombs
 		_, ce := io.Copy(df, io.LimitReader(sf, 4<<30))
 		sf.Close()
 		df.Close()
@@ -2260,6 +2026,7 @@ func secureDelete(path string) {
 	os.Remove(path)
 }
 
+// shredFile: 11-pass Gutmann-class overwrite
 func shredFile(path string) {
 	f, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
@@ -2294,7 +2061,7 @@ func shredFile(path string) {
 				}
 			case 10:
 				for i := range c {
-					c[i] = 0x55
+					c[i] = 0x55 // alternating bits
 				}
 			}
 			f.Write(c)
@@ -2312,12 +2079,14 @@ func getDesktopPath() string {
 	}
 	home := u.HomeDir
 
+	// Linux: check XDG_DESKTOP_DIR first (used by Tails, Whonix, most distros)
 	if runtime.GOOS == "linux" {
 		if xdg := os.Getenv("XDG_DESKTOP_DIR"); xdg != "" {
 			if info, err := os.Stat(xdg); err == nil && info.IsDir() {
 				return xdg
 			}
 		}
+		// Try xdg-user-dir command (works on Tails, Whonix, GNOME, KDE)
 		if out, err := exec.Command("xdg-user-dir", "DESKTOP").Output(); err == nil {
 			dir := strings.TrimSpace(string(out))
 			if dir != "" && dir != home {
@@ -2326,12 +2095,14 @@ func getDesktopPath() string {
 				}
 			}
 		}
+		// Tails persistent storage
 		tails := filepath.Join(home, "Persistent")
 		if info, err := os.Stat(tails); err == nil && info.IsDir() {
 			return tails
 		}
 	}
 
+	// Windows: check OneDrive desktop first
 	if runtime.GOOS == "windows" {
 		oneDrive := filepath.Join(home, "OneDrive", "Desktop")
 		if info, err := os.Stat(oneDrive); err == nil && info.IsDir() {
@@ -2339,16 +2110,19 @@ func getDesktopPath() string {
 		}
 	}
 
+	// Universal: ~/Desktop (macOS, Windows, most Linux)
 	d := filepath.Join(home, "Desktop")
 	if info, err := os.Stat(d); err == nil && info.IsDir() {
 		return d
 	}
 
+	// Linux fallback: ~/Documents
 	docs := filepath.Join(home, "Documents")
 	if info, err := os.Stat(docs); err == nil && info.IsDir() {
 		return docs
 	}
 
+	// Last resort: home directory itself
 	if info, err := os.Stat(home); err == nil && info.IsDir() {
 		return home
 	}
@@ -2357,9 +2131,11 @@ func getDesktopPath() string {
 }
 
 func fallbackOutputDir() string {
+	// Try current working directory
 	if wd, err := os.Getwd(); err == nil {
 		return wd
 	}
+	// Try temp dir as absolute last resort
 	return os.TempDir()
 }
 
@@ -2385,94 +2161,8 @@ func notifyStatus(lbl *widget.Label, msg string) {
 }
 
 // ============================================================================
-// MAIN — OBSIDIAN EDITION UI
+// MAIN — FORTRESS EDITION UI
 // ============================================================================
-
-// ============================================================================
-// LICENSE / ACTIVATION
-// ============================================================================
-
-const activateAPI = "https://api.costrinity.xyz/api/crypt-activate"
-const licenseFile = ".crypt_license"
-
-type LicenseCache struct {
-	Valid    bool   `json:"valid"`
-	Tier     string `json:"tier"`
-	Email    string `json:"email"`
-	Code     string `json:"code"`
-	CachedAt string `json:"cached_at"`
-}
-
-func licensePath() string {
-	u, err := user.Current()
-	if err != nil {
-		return licenseFile
-	}
-	return filepath.Join(u.HomeDir, licenseFile)
-}
-
-func loadLicense() *LicenseCache {
-	data, err := os.ReadFile(licensePath())
-	if err != nil {
-		return nil
-	}
-	var lc LicenseCache
-	if json.Unmarshal(data, &lc) != nil {
-		return nil
-	}
-	if !lc.Valid {
-		return nil
-	}
-	return &lc
-}
-
-func saveLicense(lc *LicenseCache) {
-	data, _ := json.Marshal(lc)
-	os.WriteFile(licensePath(), data, 0600)
-}
-
-func activateLicense(code, email string) (*LicenseCache, error) {
-	reqURL := fmt.Sprintf("%s?code=%s&email=%s", activateAPI, code, email)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(reqURL)
-	if err != nil {
-		return nil, fmt.Errorf("network error — check your connection: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read server response")
-	}
-
-	var result struct {
-		Valid    bool   `json:"valid"`
-		Tier     string `json:"tier"`
-		Email    string `json:"email"`
-		Error    string `json:"error"`
-		Message  string `json:"message"`
-	}
-	if json.Unmarshal(body, &result) != nil {
-		return nil, fmt.Errorf("invalid response from server")
-	}
-	if !result.Valid {
-		msg := result.Error
-		if msg == "" {
-			msg = "activation failed"
-		}
-		return nil, fmt.Errorf("%s", msg)
-	}
-	lc := &LicenseCache{
-		Valid:    true,
-		Tier:     result.Tier,
-		Email:    result.Email,
-		Code:     code,
-		CachedAt: time.Now().Format(time.RFC3339),
-	}
-	saveLicense(lc)
-	return lc, nil
-}
 
 func main() {
 	iconBytes, _ := embeddedFiles.ReadFile("assets/icon.png")
@@ -2482,17 +2172,15 @@ func main() {
 	a.SetIcon(iconRes)
 	a.Settings().SetTheme(&costrinityTheme{})
 
-	w := a.NewWindow("CRYpT v6.1 — Free Edition")
-	w.Resize(fyne.NewSize(820, 780))
+	w := a.NewWindow("CRYpT v6.0 OBSIDIAN")
+	w.Resize(fyne.NewSize(800, 740))
 	w.CenterOnScreen()
 
-	// Load cached license
-	cachedLicense := loadLicense()
-	isPro := cachedLicense != nil && cachedLicense.Valid
-
+	// ── State ──
 	var keyFileData []byte
 	currentMode := ModeMilitary
 	compressEnabled := true
+	proUnlocked := isProUnlocked()
 
 	// ── Title Block ──
 	titleMain := canvas.NewText("C R Y p T", colCyan)
@@ -2500,18 +2188,50 @@ func main() {
 	titleMain.Alignment = fyne.TextAlignCenter
 	titleMain.TextStyle = fyne.TextStyle{Bold: true}
 
-	titleSub := canvas.NewText("COSTRINITY CIPHER LANGUAGE", colCyanDim)
+	titleSub := canvas.NewText("COSTRINITY CIPHER PROTOCOL", colCyanDim)
 	titleSub.TextSize = 10
 	titleSub.Alignment = fyne.TextAlignCenter
 
-	edition := canvas.NewText("FREE EDITION v6.1  //  Triple KDF  //  CCL Secret Algorithm  //  6-Cipher AEAD  //  Standard + Military Modes", colMidText)
+	edition := canvas.NewText("OBSIDIAN EDITION v6.0  //  17-Layer Cascade  //  5-Cipher AEAD  //  Double Argon2id  //  Quint Integrity", colMidText)
 	edition.TextSize = 9
 	edition.Alignment = fyne.TextAlignCenter
 
+	// ── License status indicator ──
+	licenseStatusText := "FREE"
+	licenseStatusColor := colWarn
+	if proUnlocked {
+		licenseStatusText = "PRO \u2713"
+		licenseStatusColor = colSuccess
+	}
+	licenseLabel := canvas.NewText(licenseStatusText, licenseStatusColor)
+	licenseLabel.TextSize = 11
+	licenseLabel.TextStyle = fyne.TextStyle{Bold: true}
+	licenseLabel.Alignment = fyne.TextAlignCenter
+
+	// Neon accent line under title
 	accentLine := canvas.NewRectangle(colCyan)
 	accentLine.SetMinSize(fyne.NewSize(0, 2))
 
-	titleBlock := container.NewVBox(titleMain, titleSub, edition, accentLine)
+	// refreshLicenseUI updates the license label after activation
+	refreshLicenseUI := func() {
+		proUnlocked = isProUnlocked()
+		if proUnlocked {
+			licenseLabel.Text = "PRO \u2713"
+			licenseLabel.Color = colSuccess
+		} else {
+			licenseLabel.Text = "FREE"
+			licenseLabel.Color = colWarn
+		}
+		licenseLabel.Refresh()
+	}
+
+	titleBlock := container.NewVBox(
+		titleMain,
+		titleSub,
+		edition,
+		licenseLabel,
+		accentLine,
+	)
 
 	// ── Password ──
 	pwLabel := canvas.NewText("PASSWORD", colCyanDim)
@@ -2531,10 +2251,15 @@ func main() {
 		strLabel.Refresh()
 	}
 
-	pwBlock := container.NewVBox(pwLabel, pwEntry, container.NewHBox(strLabel, layout.NewSpacer()))
+	pwBlock := container.NewVBox(
+		pwLabel,
+		pwEntry,
+		container.NewHBox(strLabel, layout.NewSpacer()),
+	)
 
+	// ── Shared progress/status (declared early for use in callbacks) ──
 	progress := widget.NewProgressBar()
-	statusLabel := widget.NewLabel("READY  //  OBSIDIAN EDITION — THE ALGORITHM IS SECRET")
+	statusLabel := widget.NewLabel("READY  //  OBSIDIAN EDITION ARMED")
 
 	// ── Key File ──
 	kfLabel := widget.NewLabel("Key File: None")
@@ -2565,35 +2290,78 @@ func main() {
 	encHeader.TextSize = 10
 	encHeader.TextStyle = fyne.TextStyle{Bold: true}
 
-	modeSelect := widget.NewRadioGroup([]string{"Standard", "Military", "Paranoid", "FORTRESS"}, func(s string) {
+	modeSelect := widget.NewRadioGroup([]string{"Standard", "Military", "Paranoid (PRO)", "FORTRESS (PRO)"}, func(s string) {
 		switch s {
 		case "Standard":
 			currentMode = ModeStandard
 		case "Military":
 			currentMode = ModeMilitary
-		case "Paranoid":
+		case "Paranoid (PRO)":
 			currentMode = ModeParanoid
-		case "FORTRESS":
+		case "FORTRESS (PRO)":
 			currentMode = ModeFortress
 		}
 	})
 	modeSelect.Horizontal = true
 	modeSelect.Selected = "Military"
 
-	modeDesc := canvas.NewText("Standard: ~384MB  |  Military: ~768MB  |  Paranoid: PRO ONLY  |  FORTRESS: PRO ONLY", colDimText)
+	modeDesc := canvas.NewText("Standard: 256MB  |  Military: 512MB  |  Paranoid: 1GB (PRO)  |  FORTRESS: 2GB (PRO)", colDimText)
 	modeDesc.TextSize = 9
 	modeDesc.Alignment = fyne.TextAlignCenter
 
-	fortressWarn := canvas.NewText("🔒 Paranoid + FORTRESS modes require CRYpT Pro — upgrade at costrinity.xyz/crypt", colWarn)
+	fortressWarn := canvas.NewText("FORTRESS mode uses 2GB RAM + 32 iterations — maximum brute-force resistance", colWarn)
 	fortressWarn.TextSize = 9
 	fortressWarn.Alignment = fyne.TextAlignCenter
 
-	cclInfo := canvas.NewText("CCL: The cipher pipeline (S-Box passes, Feistel rounds) is derived from your password — the algorithm itself is secret", colSuccess)
-	cclInfo.TextSize = 9
-	cclInfo.Alignment = fyne.TextAlignCenter
-
 	compressCheck := widget.NewCheck("Compress before encryption", func(v bool) { compressEnabled = v })
 	compressCheck.Checked = true
+
+	// ── Activate Pro button + dialog ──
+	activateProBtn := widget.NewButton("Activate Pro", func() {
+		codeEntry := widget.NewEntry()
+		codeEntry.SetPlaceHolder("Enter 32-character activation code")
+		emailEntry := widget.NewEntry()
+		emailEntry.SetPlaceHolder("Email (optional)")
+		formItems := []*widget.FormItem{
+			widget.NewFormItem("Activation Code", codeEntry),
+			widget.NewFormItem("Email", emailEntry),
+		}
+		d := dialog.NewForm("Activate CRYpT Pro", "Activate", "Cancel", formItems, func(ok bool) {
+			if !ok {
+				return
+			}
+			code := strings.TrimSpace(codeEntry.Text)
+			if len(code) != 32 {
+				notifyStatus(statusLabel, "Invalid code: must be 32 hex characters")
+				return
+			}
+			if !validateActivationCode(code) {
+				notifyStatus(statusLabel, "Invalid activation code — checksum mismatch")
+				return
+			}
+			li := &LicenseInfo{
+				Code:        code,
+				ActivatedAt: time.Now().UTC().Format(time.RFC3339),
+				Email:       strings.TrimSpace(emailEntry.Text),
+			}
+			if err := saveLicense(li); err != nil {
+				notifyStatus(statusLabel, "Failed to save license: "+err.Error())
+				return
+			}
+			refreshLicenseUI()
+			notifyStatus(statusLabel, "Pro license activated! Paranoid + FORTRESS modes unlocked.")
+		}, w)
+		d.Resize(fyne.NewSize(480, 200))
+		d.Show()
+	})
+
+	// showProRequiredDialog shows a dialog when non-pro user selects a pro mode
+	showProRequiredDialog := func() {
+		dialog.ShowInformation("Pro License Required",
+			"Paranoid and FORTRESS modes require a Pro license.\n\n"+
+				"Enter your activation code using the 'Activate Pro' button,\n"+
+				"or purchase at costrinity.xyz/crypt ($14.99).", w)
+	}
 
 	encFileBtn := widget.NewButton("Encrypt File", func() {
 		pw := pwEntry.Text
@@ -2601,8 +2369,12 @@ func main() {
 			notifyStatus(statusLabel, "Error: password required")
 			return
 		}
-		kf := keyFileData
 		mode := currentMode
+		if requiresProLicense(mode) && !proUnlocked {
+			showProRequiredDialog()
+			return
+		}
+		kf := keyFileData
 		comp := compressEnabled
 		dialog.ShowFileOpen(func(r fyne.URIReadCloser, err error) {
 			if err != nil || r == nil {
@@ -2620,8 +2392,12 @@ func main() {
 			notifyStatus(statusLabel, "Error: password required")
 			return
 		}
-		kf := keyFileData
 		mode := currentMode
+		if requiresProLicense(mode) && !proUnlocked {
+			showProRequiredDialog()
+			return
+		}
+		kf := keyFileData
 		comp := compressEnabled
 		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
 			if err != nil || uri == nil {
@@ -2631,7 +2407,7 @@ func main() {
 		}, w)
 	})
 
-	layers := canvas.NewText("Triple KDF > S-Box×4-8 > Permute > Feistel×3-6 > AES > XChaCha > AES > XChaCha > AES > XChaCha > 5× Integrity", colDimText)
+	layers := canvas.NewText("S-Box x4 > Diffuse > 3xFeistel(64R) > AES > XChaCha > AES > XChaCha > AES > 5x Integrity", colDimText)
 	layers.TextSize = 8
 	layers.Alignment = fyne.TextAlignCenter
 
@@ -2640,12 +2416,13 @@ func main() {
 		modeSelect,
 		modeDesc,
 		fortressWarn,
-		cclInfo,
 		neonSeparator(colSep),
 		compressCheck,
 		neonSeparator(colSep),
 		container.NewGridWithColumns(2, encFileBtn, encFolderBtn),
 		layers,
+		neonSeparator(colSep),
+		container.NewHBox(layout.NewSpacer(), activateProBtn, layout.NewSpacer()),
 	))
 
 	// ════════ DECRYPT TAB ════════
@@ -2687,15 +2464,20 @@ func main() {
 		fd.Show()
 	})
 
-	decInfo1 := canvas.NewText("Auto-detects v2 / v3 / v4 / v5 / v6 — full backward compatibility", colDimText)
+	decInfo1 := canvas.NewText("Verify checks password + triple integrity without decrypting", colDimText)
 	decInfo1.TextSize = 9
 	decInfo1.Alignment = fyne.TextAlignCenter
+	decInfo2 := canvas.NewText("Auto-detects v2 / v3 / v4 format  //  Full backward compatibility", colDimText)
+	decInfo2.TextSize = 9
+	decInfo2.Alignment = fyne.TextAlignCenter
 
 	decryptTab := container.NewVScroll(container.NewVBox(
 		decBtn,
 		neonSeparator(colSep),
 		verifyBtn,
 		decInfo1,
+		neonSeparator(colSep),
+		decInfo2,
 	))
 
 	// ════════ TOOLS TAB ════════
@@ -2703,7 +2485,7 @@ func main() {
 	genLo, genUp, genDg, genSy := true, true, true, true
 
 	lenLabel := widget.NewLabel("Length: 24")
-	lenSlider := widget.NewSlider(14, 64)
+	lenSlider := widget.NewSlider(12, 64)
 	lenSlider.Step = 1
 	lenSlider.Value = 24
 	lenSlider.OnChanged = func(v float64) {
@@ -2753,65 +2535,60 @@ func main() {
 	))
 
 	// ════════ ABOUT TAB ════════
-	aboutTitle := canvas.NewText("CRYpT v6.1 — Free Edition", colCyan)
+	aboutTitle := canvas.NewText("CRYpT v6.0 OBSIDIAN EDITION", colCyan)
 	aboutTitle.TextSize = 14
 	aboutTitle.TextStyle = fyne.TextStyle{Bold: true}
 	aboutTitle.Alignment = fyne.TextAlignCenter
 
-	aboutProto := canvas.NewText("Costrinity Cipher Language (CCL) Protocol v6", colCyanDim)
+	aboutProto := canvas.NewText("Costrinity Cipher Language Protocol v5", colCyanDim)
 	aboutProto.TextSize = 10
 	aboutProto.Alignment = fyne.TextAlignCenter
 
-	aboutInnovation := canvas.NewText("THE ALGORITHM ITSELF IS SECRET", colSuccess)
-	aboutInnovation.TextSize = 11
-	aboutInnovation.TextStyle = fyne.TextStyle{Bold: true}
-	aboutInnovation.Alignment = fyne.TextAlignCenter
-
-	aboutLayersHdr := canvas.NewText("20-LAYER ENCRYPTION ARCHITECTURE", colCyan)
+	aboutLayersHdr := canvas.NewText("17-LAYER ENCRYPTION ARCHITECTURE", colCyan)
 	aboutLayersHdr.TextSize = 10
 	aboutLayersHdr.TextStyle = fyne.TextStyle{Bold: true}
 
 	aboutLayers := widget.NewLabel(
-		"  L0   Triple KDF: Argon2id → scrypt → HKDF-SHA3\n" +
+		"  L0   Double Argon2id (256MB-2GB x2, 256-byte split salt)\n" +
 			"  L1   zlib compression\n" +
-			"  L2   Dual canary (head + tail)\n" +
-			"  L3   Random padding 512-8192B\n" +
-			"  L4   CCL S-Box ×4-8 (key-derived count)\n" +
-			"  L5   Cascade diffusion\n" +
-			"  L6   Block permutation (transposition)\n" +
-			"  L7   CCL Feistel ×3-6 (64-127 rounds each)\n" +
-			"  L8   AES-256-GCM pass 1\n" +
-			"  L9   XChaCha20-Poly1305 pass 1\n" +
-			"  L10  AES-256-GCM pass 2\n" +
-			"  L11  XChaCha20-Poly1305 pass 2\n" +
-			"  L12  AES-256-GCM pass 3\n" +
-			"  L13  XChaCha20-Poly1305 pass 3\n" +
-			"  L14  Quintuple integrity: 2×SHA3 + BLAKE2b + SHA512 + full-file")
+			"  L2   Dual canary (head + tail chain verification)\n" +
+			"  L3   Random padding 512-8192B (size obfuscation)\n" +
+			"  L4   Quadruple S-Box (four key-derived substitutions)\n" +
+			"  L5   Cascade diffusion (XOR stream + rotation)\n" +
+			"  L6   Triple 64-round Feistel (192 total rounds)\n" +
+			"  L7   AES-256-GCM pass 1\n" +
+			"  L8   XChaCha20-Poly1305 pass 1\n" +
+			"  L9   AES-256-GCM pass 2\n" +
+			"  L10  XChaCha20-Poly1305 pass 2\n" +
+			"  L11  AES-256-GCM pass 3\n" +
+			"  L12  Quint integrity: 2xSHA3 + BLAKE2b + HMAC-SHA512\n" +
+			"  L13  Full-file HMAC (header + payload authentication)")
 
-	aboutSecHdr := canvas.NewText("WHY CCL IS UNBREAKABLE", colCyan)
+	aboutSecHdr := canvas.NewText("SECURITY HIGHLIGHTS", colCyan)
 	aboutSecHdr.TextSize = 10
 	aboutSecHdr.TextStyle = fyne.TextStyle{Bold: true}
 
 	aboutSec := widget.NewLabel(
-		"  - Triple KDF: Attacker must defeat Argon2id THEN scrypt THEN HKDF\n" +
-			"  - CCL Grammar: S-Box passes, Feistel rounds derived from key\n" +
-			"  - The algorithm structure is secret — not just the key\n" +
-			"  - 6 AEAD passes: AES-XChaCha-AES-XChaCha-AES-XChaCha\n" +
-			"  - 192-762 total Feistel rounds (key-dependent)\n" +
-			"  - FORTRESS: ~3GB total memory (1GB Argon2id + 1GB scrypt)\n" +
-			"  - 384-byte master salt (3× independent salts)\n" +
-			"  - Block permutation adds transposition layer\n" +
-			"  - 5 integrity hashes across 3 hash families\n" +
+		"  - Double Argon2id: attacker pays 2x KDF cost per guess\n" +
+			"  - SHA3-512 password pre-hash before KDF\n" +
+			"  - 5-cipher AEAD cascade (AES-XChaCha-AES-XChaCha-AES)\n" +
+			"  - 20 independent sub-keys (640 bytes key material)\n" +
+			"  - 2048-bit salt eliminates all precomputation\n" +
+			"  - FORTRESS: 2GB x2 Argon2id + 32 iterations x2\n" +
+			"  - 192 Feistel rounds across 3 independent passes\n" +
+			"  - Quadruple S-Box with 4 key-derived tables\n" +
+			"  - 5 integrity hashes + full-file authentication\n" +
+			"  - Bidirectional canary (head + tail) chain verification\n" +
+			"  - 11-pass Gutmann shredding on originals\n" +
 			"  - All intermediate buffers wiped between layers")
 
-	aboutFinal := canvas.NewText("An attacker observing only the ciphertext has no idea what operations were performed.", colMidText)
+	aboutFinal := canvas.NewText("Every layer must be independently defeated  //  No known or theoretical shortcut exists", colMidText)
 	aboutFinal.TextSize = 9
 	aboutFinal.Alignment = fyne.TextAlignCenter
 
 	aboutTab := container.NewVScroll(container.NewVBox(
 		aboutTitle,
 		aboutProto,
-		aboutInnovation,
 		neonSeparator(colCyanDark),
 		aboutLayersHdr,
 		aboutLayers,
@@ -2822,138 +2599,39 @@ func main() {
 		aboutFinal,
 	))
 
-	// ════════ ACTIVATE TAB ════════
-	var activateStatusLabel *widget.Label
-	var proIndicator *canvas.Text
-
-	updateProStatus := func() {
-		if isPro {
-			proIndicator.Text = "✓  PRO ACTIVE — Paranoid + FORTRESS unlocked"
-			proIndicator.Color = colSuccess
-		} else {
-			proIndicator.Text = "FREE TIER — Standard + Military only"
-			proIndicator.Color = colMidText
-		}
-		proIndicator.Refresh()
-	}
-
-	proIndicator = canvas.NewText("", colMidText)
-	proIndicator.TextSize = 12
-	proIndicator.TextStyle = fyne.TextStyle{Bold: true}
-	proIndicator.Alignment = fyne.TextAlignCenter
-
-	activateStatusLabel = widget.NewLabel("")
-
-	actEmailEntry := widget.NewEntry()
-	actEmailEntry.SetPlaceHolder("Email used at purchase")
-	actCodeEntry := widget.NewEntry()
-	actCodeEntry.SetPlaceHolder("CRYPT-XXXX-XXXX-XXXX")
-
-	activateBtn := widget.NewButton("Activate Pro", func() {
-		code := strings.TrimSpace(actCodeEntry.Text)
-		email := strings.TrimSpace(actEmailEntry.Text)
-		if code == "" || email == "" {
-			activateStatusLabel.SetText("Enter your email and activation code")
-			return
-		}
-		activateStatusLabel.SetText("Verifying with costrinity.xyz...")
-		go func() {
-			lc, err := activateLicense(code, email)
-			if err != nil {
-				activateStatusLabel.SetText("Error: " + err.Error())
-				return
-			}
-			cachedLicense = lc
-			isPro = true
-			activateStatusLabel.SetText("✓ Activated! Paranoid + FORTRESS unlocked.")
-			updateProStatus()
-		}()
-	})
-
-	actHeader := canvas.NewText("ACTIVATE PRO", colCyanDim)
-	actHeader.TextSize = 10
-	actHeader.TextStyle = fyne.TextStyle{Bold: true}
-
-	actFreeLabel := canvas.NewText("FREE:  Standard  ·  Military", colMidText)
-	actFreeLabel.TextSize = 12
-	actFreeLabel.Alignment = fyne.TextAlignCenter
-
-	actProLabel := canvas.NewText("PRO ($14.99):  + Paranoid  ·  + FORTRESS", colSuccess)
-	actProLabel.TextSize = 12
-	actProLabel.Alignment = fyne.TextAlignCenter
-
-	buyBtn := widget.NewButton("Buy CRYpT Pro — $14.99", func() {
-		// Opens the Stripe payment page
-		exec.Command("cmd", "/c", "start", "https://costrinity.xyz/crypt#pricing").Start()
-		// macOS fallback
-		exec.Command("open", "https://costrinity.xyz/crypt#pricing").Start()
-		// Linux fallback
-		exec.Command("xdg-open", "https://costrinity.xyz/crypt#pricing").Start()
-	})
-
-	activateTab := container.NewVScroll(container.NewVBox(
-		actHeader,
-		neonSeparator(colSep),
-		proIndicator,
-		neonSeparator(colSep),
-		actFreeLabel,
-		actProLabel,
-		neonSeparator(colSep),
-		buyBtn,
-		neonSeparator(colSep),
-		canvas.NewText("Already purchased? Enter your activation code below.", colMidText),
-		widget.NewLabel("Email:"),
-		actEmailEntry,
-		widget.NewLabel("Activation Code:"),
-		actCodeEntry,
-		activateBtn,
-		activateStatusLabel,
-	))
-
-	updateProStatus()
-
-	// ── Wrap mode selector to enforce pro lock ──
-	modeSelect.OnChanged = func(s string) {
-		switch s {
-		case "Standard":
-			currentMode = ModeStandard
-		case "Military":
-			currentMode = ModeMilitary
-		case "Paranoid":
-			if !isPro {
-				notifyStatus(statusLabel, "Paranoid mode requires CRYpT Pro — activate in the Activate tab")
-				modeSelect.Selected = "Military"
-				currentMode = ModeMilitary
-				return
-			}
-			currentMode = ModeParanoid
-		case "FORTRESS":
-			if !isPro {
-				notifyStatus(statusLabel, "FORTRESS mode requires CRYpT Pro — activate in the Activate tab")
-				modeSelect.Selected = "Military"
-				currentMode = ModeMilitary
-				return
-			}
-			currentMode = ModeFortress
-		}
-	}
-
 	// ── Tabs ──
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Encrypt", encryptTab),
 		container.NewTabItem("Decrypt", decryptTab),
 		container.NewTabItem("Tools", toolsTab),
-		container.NewTabItem("Activate", activateTab),
 		container.NewTabItem("About", aboutTab),
 	)
 
+	// ── Status bar ──
 	statusLine := neonSeparator(colCyanDark)
-	footer := canvas.NewText("CRYpT OBSIDIAN EDITION  //  Costrinity Cipher Language  //  The Algorithm Is Secret", colDimText)
+
+	footer := canvas.NewText("CRYpT OBSIDIAN EDITION  //  5-Cipher AEAD Cascade Encryption", colDimText)
 	footer.TextSize = 8
 	footer.Alignment = fyne.TextAlignCenter
 
-	topSection := container.NewVBox(titleBlock, pwBlock, kfRow, neonSeparator(colSep))
-	bottomSection := container.NewVBox(neonSeparator(colSep), progress, statusLine, statusLabel, footer)
+	// Top section: title + password + key file (fixed height)
+	topSection := container.NewVBox(
+		titleBlock,
+		pwBlock,
+		kfRow,
+		neonSeparator(colSep),
+	)
+
+	// Bottom section: progress + status + footer (fixed height)
+	bottomSection := container.NewVBox(
+		neonSeparator(colSep),
+		progress,
+		statusLine,
+		statusLabel,
+		footer,
+	)
+
+	// Border layout: top and bottom fixed, tabs expand to fill center
 	mainLayout := container.NewBorder(topSection, bottomSection, nil, nil, tabs)
 	w.SetContent(container.NewPadded(mainLayout))
 
