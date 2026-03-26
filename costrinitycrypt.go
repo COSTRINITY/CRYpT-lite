@@ -1,8 +1,8 @@
 package main
 
 // ============================================================================
-// COSTRINITY: CRYpT v4.0 FORTRESS EDITION
-// Costrinity Cipher Language (CCL) Protocol v4
+// COSTRINITY: CRYpT v6.0 OBSIDIAN EDITION
+// Costrinity Cipher Language (CCL) Protocol v5
 //
 // 10-Layer Encryption Architecture:
 //   L0   Argon2id KDF         Memory-hard (128MB–1GB), 128-byte salt
@@ -158,7 +158,29 @@ var modeNames = [...]string{"Standard", "Military", "Paranoid", "FORTRESS"}
 // LICENSE / ACTIVATION SYSTEM
 // ============================================================================
 
-const proSalt = "COSTRINITY_CRYPT_PRO_SALT_2026"
+// proKeyA and proKeyB are XOR'd at runtime to produce the HMAC key.
+// Neither is meaningful alone — immune to `strings` dumping.
+var proKeyA = [32]byte{
+	0xc0, 0x57, 0x12, 0x9e, 0xab, 0x3f, 0x6d, 0x81,
+	0x44, 0xf7, 0x28, 0xbe, 0x53, 0x0a, 0xe6, 0x71,
+	0xd9, 0x3c, 0x85, 0x4f, 0xa2, 0x16, 0x7b, 0xc8,
+	0x60, 0xed, 0x37, 0x94, 0x0b, 0xf5, 0x5e, 0xa3,
+}
+var proKeyB = [32]byte{
+	0x91, 0x68, 0x7a, 0xf3, 0xde, 0x54, 0x09, 0xb7,
+	0x23, 0x8c, 0x41, 0xd5, 0x6f, 0xe0, 0x1a, 0x96,
+	0xbc, 0x57, 0xe3, 0x2d, 0xc4, 0x78, 0x0f, 0xa1,
+	0x35, 0x8a, 0x5c, 0xf9, 0x62, 0xd6, 0x3b, 0xc7,
+}
+
+// deriveProKey XORs the two halves at runtime to produce the HMAC key.
+func deriveProKey() []byte {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = proKeyA[i] ^ proKeyB[i]
+	}
+	return key
+}
 
 type LicenseInfo struct {
 	Code        string `json:"code"`
@@ -209,19 +231,24 @@ func saveLicense(li *LicenseInfo) error {
 	return os.WriteFile(p, data, 0600)
 }
 
-// validateActivationCode checks that a code is 32 hex chars and
-// SHA256(code + salt)[:8] starts with "c057".
+// validateActivationCode uses HMAC-SHA256 with a runtime-derived key.
+// Checks the first 8 bytes (64 bits) of the HMAC output against a
+// required prefix. Brute-force: ~2^64 attempts ≈ centuries at GPU speed.
 func validateActivationCode(code string) bool {
 	if len(code) != 32 {
 		return false
 	}
-	// Must be valid hex
 	if _, err := hex.DecodeString(code); err != nil {
 		return false
 	}
-	h := sha256.Sum256([]byte(code + proSalt))
-	prefix := hex.EncodeToString(h[:4]) // first 8 hex chars
-	return strings.HasPrefix(prefix, "c057")
+	key := deriveProKey()
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(code))
+	h := mac.Sum(nil)
+	wipeBytes(key)
+	// Check first 8 bytes (64-bit prefix) — 1 in 2^64 chance ≈ 18.4 quintillion
+	return h[0] == 0x10 && h[1] == 0xcc && h[2] == 0xf4 && h[3] == 0xc6 &&
+		h[4] == 0x87 && h[5] == 0xff && h[6] == 0xf8 && h[7] == 0xb2
 }
 
 // isProUnlocked checks if a valid Pro license exists on disk.
@@ -399,7 +426,19 @@ func generateSBox(key []byte) [256]byte {
 	seed := sha256.Sum256(key)
 	for i := 255; i > 0; i-- {
 		seed = sha256.Sum256(append(seed[:], byte(i), byte(i>>8)))
-		j := int(binary.BigEndian.Uint32(seed[:4])) % (i + 1)
+		// Rejection sampling: eliminates modulo bias entirely
+		bound := uint32(i + 1)
+		threshold := (0xFFFFFFFF - bound + 1) % bound // = -bound % bound
+		var val uint32
+		attempt := seed
+		for {
+			val = binary.BigEndian.Uint32(attempt[:4])
+			if val >= threshold {
+				break
+			}
+			attempt = sha256.Sum256(attempt[:])
+		}
+		j := int(val % bound)
 		sbox[i], sbox[j] = sbox[j], sbox[i]
 	}
 	return sbox
@@ -1135,7 +1174,7 @@ func decryptV5(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 	b2.Write(encPayload)
-	if !bytes.Equal(b2.Sum(nil), b2Sum) {
+	if !hmac.Equal(b2.Sum(nil), b2Sum) {
 		notifyStatus(status, "BLAKE2b FAILED: corrupted")
 		wipeBytes(derived)
 		return
@@ -1419,7 +1458,7 @@ func decryptV4(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 	b2.Write(encPayload)
-	if !bytes.Equal(b2.Sum(nil), b2Sum) {
+	if !hmac.Equal(b2.Sum(nil), b2Sum) {
 		notifyStatus(status, "BLAKE2b FAILED: corrupted")
 		wipeBytes(derived)
 		return
@@ -1610,7 +1649,7 @@ func decryptV3(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 	b2h.Write(encPayload)
-	if !bytes.Equal(b2h.Sum(nil), b2sum) {
+	if !hmac.Equal(b2h.Sum(nil), b2sum) {
 		notifyStatus(status, "BLAKE2b FAILED")
 		wipeBytes(derived)
 		return
@@ -1732,7 +1771,7 @@ func decryptV2(data []byte, path, password string, kf []byte, progress *widget.P
 		return
 	}
 	b2h.Write(encPayload)
-	if !bytes.Equal(b2h.Sum(nil), b2sum) {
+	if !hmac.Equal(b2h.Sum(nil), b2sum) {
 		notifyStatus(status, "BLAKE2b FAILED")
 		wipeBytes(derived)
 		return
