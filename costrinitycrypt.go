@@ -71,6 +71,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -2180,6 +2181,53 @@ func shredFile(path string) {
 	f.Close()
 }
 
+// nativeFolderPicker opens the OS-native folder selection dialog.
+// Works on Windows, macOS, and Linux without Fyne's broken dialog.
+func nativeFolderPicker() string {
+	switch runtime.GOOS {
+	case "windows":
+		// Use PowerShell to show native Windows folder browser
+		cmd := exec.Command("powershell", "-NoProfile", "-Command",
+			`Add-Type -AssemblyName System.Windows.Forms; `+
+				`$f = New-Object System.Windows.Forms.FolderBrowserDialog; `+
+				`$f.Description = 'Select folder to encrypt'; `+
+				`$f.ShowNewFolderButton = $false; `+
+				`if ($f.ShowDialog() -eq 'OK') { $f.SelectedPath } else { '' }`)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	case "darwin":
+		// Use osascript on macOS
+		cmd := exec.Command("osascript", "-e",
+			`POSIX path of (choose folder with prompt "Select folder to encrypt")`)
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimRight(strings.TrimSpace(string(out)), "/")
+	default:
+		// Linux: try zenity, then kdialog
+		if p, err := exec.LookPath("zenity"); err == nil {
+			cmd := exec.Command(p, "--file-selection", "--directory", "--title=Select folder to encrypt")
+			out, err := cmd.Output()
+			if err == nil {
+				return strings.TrimSpace(string(out))
+			}
+		}
+		if p, err := exec.LookPath("kdialog"); err == nil {
+			cmd := exec.Command(p, "--getexistingdirectory", ".", "--title", "Select folder to encrypt")
+			out, err := cmd.Output()
+			if err == nil {
+				return strings.TrimSpace(string(out))
+			}
+		}
+		return ""
+	}
+}
+
 func getDesktopPath() string {
 	u, err := user.Current()
 	if err != nil {
@@ -2501,7 +2549,7 @@ func main() {
 		}, w)
 	})
 
-	// ── Folder encryption: pick any file inside the folder, encrypts entire parent folder ──
+	// ── Folder encryption using native OS folder picker ──
 	encFolderBtn := widget.NewButton("Encrypt Folder", func() {
 		pw := pwEntry.Text
 		if pw == "" {
@@ -2515,16 +2563,18 @@ func main() {
 		}
 		kf := keyFileData
 		comp := compressEnabled
-		// Open a FILE picker — user picks any file INSIDE the target folder
-		fd := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
-			if err != nil || r == nil {
+
+		go func() {
+			folderPath := nativeFolderPicker()
+			if folderPath == "" {
 				return
 			}
-			filePath := r.URI().Path()
-			r.Close()
-			folderPath := filepath.Dir(filePath)
+			info, err := os.Stat(folderPath)
+			if err != nil || !info.IsDir() {
+				notifyStatus(statusLabel, "Error: invalid folder path")
+				return
+			}
 			folderName := filepath.Base(folderPath)
-			// Count files for the confirmation
 			fileCount := 0
 			filepath.WalkDir(folderPath, func(_ string, d fs.DirEntry, _ error) error {
 				if d != nil && !d.IsDir() {
@@ -2532,22 +2582,24 @@ func main() {
 				}
 				return nil
 			})
-			// Confirm with user
-			dialog.ShowConfirm("Encrypt Entire Folder?",
-				fmt.Sprintf("Encrypt folder \"%s\" and ALL %d files inside it?\n\nPath: %s",
-					folderName, fileCount, folderPath),
-				func(ok bool) {
-					if ok {
-						go encryptPath(folderPath, pw, kf, mode, true, comp, progress, statusLabel)
-					}
-				}, w)
-		}, w)
-		fd.Show()
+			if fileCount == 0 {
+				notifyStatus(statusLabel, "Error: folder is empty")
+				return
+			}
+			// Confirm on main thread, then encrypt
+			confirmed := make(chan bool, 1)
+			go func() {
+				// Show dialog on Fyne's goroutine-safe path
+				dialog.ShowConfirm("Encrypt Entire Folder?",
+					fmt.Sprintf("Encrypt \"%s\" — %d files inside?\n\nPath: %s",
+						folderName, fileCount, folderPath),
+					func(ok bool) { confirmed <- ok }, w)
+			}()
+			if <-confirmed {
+				encryptPath(folderPath, pw, kf, mode, true, comp, progress, statusLabel)
+			}
+		}()
 	})
-
-	folderHint := canvas.NewText("Pick any file inside the folder — encrypts the entire parent folder", colDimText)
-	folderHint.TextSize = 11
-	folderHint.Alignment = fyne.TextAlignCenter
 
 	layers := canvas.NewText("S-Box x4 > Diffuse > 3xFeistel(64R) > AES > XChaCha > AES > XChaCha > AES > 5x Integrity", colDimText)
 	layers.TextSize = 11
@@ -2562,7 +2614,6 @@ func main() {
 		compressCheck,
 		neonSeparator(colSep),
 		container.NewGridWithColumns(2, encFileBtn, encFolderBtn),
-		folderHint,
 		layers,
 	))
 
