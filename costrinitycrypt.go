@@ -2549,7 +2549,7 @@ func main() {
 		}, w)
 	})
 
-	// ── Folder encryption using native OS folder picker ──
+	// ── Folder encryption: paste path dialog ──
 	encFolderBtn := widget.NewButton("Encrypt Folder", func() {
 		pw := pwEntry.Text
 		if pw == "" {
@@ -2564,46 +2564,77 @@ func main() {
 		kf := keyFileData
 		comp := compressEnabled
 
-		go func() {
-			folderPath := nativeFolderPicker()
-			if folderPath == "" {
-				return
-			}
-			info, err := os.Stat(folderPath)
-			if err != nil || !info.IsDir() {
-				notifyStatus(statusLabel, "Error: invalid folder path")
-				return
-			}
-			folderName := filepath.Base(folderPath)
-			fileCount := 0
-			filepath.WalkDir(folderPath, func(_ string, d fs.DirEntry, _ error) error {
-				if d != nil && !d.IsDir() {
-					fileCount++
+		// Show a simple entry dialog — user pastes folder path
+		pathEntry := widget.NewEntry()
+		pathEntry.SetPlaceHolder("C:\\Users\\you\\Documents\\MyFolder")
+		pathEntry.MultiLine = false
+
+		helpText := widget.NewLabel("Right-click folder in Explorer → Copy as path → Paste here")
+		helpText.Wrapping = fyne.TextWrapWord
+
+		d := dialog.NewCustomConfirm("Encrypt Folder", "Encrypt", "Cancel",
+			container.NewVBox(
+				helpText,
+				pathEntry,
+			),
+			func(ok bool) {
+				if !ok {
+					return
 				}
-				return nil
-			})
-			if fileCount == 0 {
-				notifyStatus(statusLabel, "Error: folder is empty")
-				return
-			}
-			// Confirm on main thread, then encrypt
-			confirmed := make(chan bool, 1)
-			go func() {
-				// Show dialog on Fyne's goroutine-safe path
-				dialog.ShowConfirm("Encrypt Entire Folder?",
-					fmt.Sprintf("Encrypt \"%s\" — %d files inside?\n\nPath: %s",
-						folderName, fileCount, folderPath),
-					func(ok bool) { confirmed <- ok }, w)
-			}()
-			if <-confirmed {
-				encryptPath(folderPath, pw, kf, mode, true, comp, progress, statusLabel)
-			}
-		}()
+				folderPath := strings.TrimSpace(pathEntry.Text)
+				folderPath = strings.Trim(folderPath, "\"' ")
+				if folderPath == "" {
+					notifyStatus(statusLabel, "Error: no folder path entered")
+					return
+				}
+				info, err := os.Stat(folderPath)
+				if err != nil {
+					notifyStatus(statusLabel, "Error: folder not found — "+folderPath)
+					return
+				}
+				if !info.IsDir() {
+					notifyStatus(statusLabel, "Error: that's a file, not a folder")
+					return
+				}
+				fileCount := 0
+				filepath.WalkDir(folderPath, func(_ string, d fs.DirEntry, _ error) error {
+					if d != nil && !d.IsDir() {
+						fileCount++
+					}
+					return nil
+				})
+				if fileCount == 0 {
+					notifyStatus(statusLabel, "Error: folder is empty")
+					return
+				}
+				notifyStatus(statusLabel, fmt.Sprintf("Encrypting %d files in \"%s\"...", fileCount, filepath.Base(folderPath)))
+				go encryptPath(folderPath, pw, kf, mode, true, comp, progress, statusLabel)
+			}, w)
+		d.Resize(fyne.NewSize(500, 180))
+		d.Show()
 	})
 
 	layers := canvas.NewText("S-Box x4 > Diffuse > 3xFeistel(64R) > AES > XChaCha > AES > XChaCha > AES > 5x Integrity", colDimText)
 	layers.TextSize = 11
 	layers.Alignment = fyne.TextAlignCenter
+
+	// Simple step-by-step instructions
+	step1 := canvas.NewText("1. Type a password above (14+ characters)", colDimText)
+	step1.TextSize = 13
+	step2 := canvas.NewText("2. Pick a security mode (Standard is fine for most files)", colDimText)
+	step2.TextSize = 13
+	step3 := canvas.NewText("3. Click \"Encrypt File\" to lock one file", colDimText)
+	step3.TextSize = 13
+	step4 := canvas.NewText("4. To encrypt a whole folder, click \"Encrypt Folder\" at the bottom", colDimText)
+	step4.TextSize = 13
+	step5 := canvas.NewText("Your encrypted .crypt file appears on your Desktop when done!", colCyan)
+	step5.TextSize = 13
+
+	instructions := container.NewVBox(
+		step1, step2, step3, step4,
+		neonSeparator(colSep),
+		step5,
+	)
 
 	encryptTab := container.NewVScroll(container.NewVBox(
 		encHeader,
@@ -2614,6 +2645,8 @@ func main() {
 		compressCheck,
 		neonSeparator(colSep),
 		container.NewGridWithColumns(2, encFileBtn, encFolderBtn),
+		neonSeparator(colSep),
+		instructions,
 		layers,
 	))
 
