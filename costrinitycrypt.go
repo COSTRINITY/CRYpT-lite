@@ -2475,7 +2475,7 @@ func main() {
 	// ── Activate Pro button — opens website + shows code entry dialog ──
 	activateProBtn := widget.NewButton("Activate Pro", func() {
 		// Open the purchase/activation page in the user's browser
-		u, _ := url.Parse("https://costrinity.xyz/crypt")
+		u, _ := url.Parse("https://costrinity.xyz/crypt.html#pricing")
 		_ = a.OpenURL(u)
 
 		// Show the activation dialog with code + email fields
