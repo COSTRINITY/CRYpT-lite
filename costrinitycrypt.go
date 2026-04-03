@@ -1,7 +1,7 @@
 package main
 
 // ============================================================================
-// COSTRINITY: CRYpT v6.1 — Free Edition
+// COSTRINITY: CRYpT v6.1 — Free Edition EDITION
 // Costrinity Cipher Language (CCL) Protocol v6
 //
 // v6 uses SHAKE-256 XOF + BLAKE2b for S-Box/Feistel/keystream (3x faster than SHA-256)
@@ -78,6 +78,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unsafe"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/blake2b"
@@ -90,7 +91,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/storage"
+
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -2788,6 +2789,74 @@ func notifyStatus(lbl *widget.Label, msg string) {
 }
 
 // ============================================================================
+// NATIVE FILE DIALOGS (Windows)
+// ============================================================================
+
+// nativeOpenFile shows the Windows native "Open File" dialog (all file types visible).
+func nativeOpenFile(w fyne.Window) string {
+	return nativeFileDialog("All Files (*.*)\x00*.*\x00\x00")
+}
+
+// nativeOpenCrypt shows the Windows native "Open File" dialog filtered to .crypt files.
+func nativeOpenCrypt(w fyne.Window) string {
+	return nativeFileDialog("CRYpT Files (*.crypt)\x00*.crypt\x00All Files (*.*)\x00*.*\x00\x00")
+}
+
+func utf16FromRaw(s string) []uint16 {
+	out := make([]uint16, 0, len(s)+1)
+	for _, c := range s {
+		out = append(out, uint16(c))
+	}
+	out = append(out, 0)
+	return out
+}
+
+func nativeFileDialog(filter string) string {
+	ofn := &openFileName{}
+	buf := make([]uint16, 65536)
+	ofn.lStructSize = uint32(unsafe.Sizeof(*ofn))
+	ofn.lpstrFile = &buf[0]
+	ofn.nMaxFile = uint32(len(buf))
+	filterUTF16 := utf16FromRaw(filter)
+	ofn.lpstrFilter = &filterUTF16[0]
+	ofn.flags = 0x00080000 | 0x00001000 | 0x00000800 // OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST
+
+	comdlg32 := syscall.NewLazyDLL("comdlg32.dll")
+	getOpenFileName := comdlg32.NewProc("GetOpenFileNameW")
+	r, _, _ := getOpenFileName.Call(uintptr(unsafe.Pointer(ofn)))
+	if r == 0 {
+		return ""
+	}
+	return syscall.UTF16ToString(buf[:])
+}
+
+type openFileName struct {
+	lStructSize       uint32
+	hwndOwner         uintptr
+	hInstance         uintptr
+	lpstrFilter       *uint16
+	lpstrCustomFilter *uint16
+	nMaxCustFilter    uint32
+	nFilterIndex      uint32
+	lpstrFile         *uint16
+	nMaxFile          uint32
+	lpstrFileTitle    *uint16
+	nMaxFileTitle     uint32
+	lpstrInitialDir   *uint16
+	lpstrTitle        *uint16
+	flags             uint32
+	nFileOffset       uint16
+	nFileExtension    uint16
+	lpstrDefExt       *uint16
+	lCustData         uintptr
+	lpfnHook          uintptr
+	lpTemplateName    *uint16
+	pvReserved        uintptr
+	dwReserved        uint32
+	flagsEx           uint32
+}
+
+// ============================================================================
 // MAIN — FORTRESS EDITION UI
 // ============================================================================
 
@@ -2819,7 +2888,7 @@ func main() {
 	titleSub.TextSize = 13
 	titleSub.Alignment = fyne.TextAlignCenter
 
-	edition := canvas.NewText("FREE EDITION v6.1  //  17-Layer Cascade  //  5-Cipher AEAD  //  Double Argon2id  //  Quint Integrity", colMidText)
+	edition := canvas.NewText("OBSIDIAN EDITION v6.1  //  17-Layer Cascade  //  5-Cipher AEAD  //  Double Argon2id  //  Quint Integrity", colMidText)
 	edition.TextSize = 12
 	edition.Alignment = fyne.TextAlignCenter
 
@@ -2891,20 +2960,19 @@ func main() {
 	// ── Key File ──
 	kfLabel := widget.NewLabel("Key File: None")
 	kfLoadBtn := widget.NewButton("Load Key File", func() {
-		dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
-			if err != nil || reader == nil {
+		go func() {
+			p := nativeOpenFile(w)
+			if p == "" {
 				return
 			}
-			name := filepath.Base(reader.URI().Path())
-			d, readErr := io.ReadAll(reader)
-			reader.Close()
+			d, readErr := os.ReadFile(p)
 			if readErr != nil {
 				notifyStatus(statusLabel, "Key file read error: "+readErr.Error())
 				return
 			}
 			keyFileData = d
-			kfLabel.SetText("Key File: " + name)
-		}, w)
+			kfLabel.SetText("Key File: " + filepath.Base(p))
+		}()
 	})
 	kfClearBtn := widget.NewButton("Clear", func() {
 		keyFileData = nil
@@ -3010,14 +3078,13 @@ func main() {
 		}
 		kf := keyFileData
 		comp := compressEnabled
-		dialog.ShowFileOpen(func(r fyne.URIReadCloser, err error) {
-			if err != nil || r == nil {
+		go func() {
+			p := nativeOpenFile(w)
+			if p == "" {
 				return
 			}
-			p := r.URI().Path()
-			r.Close()
-			go encryptPath(p, pw, kf, mode, false, comp, progress, statusLabel)
-		}, w)
+			encryptPath(p, pw, kf, mode, false, comp, progress, statusLabel)
+		}()
 	})
 
 	// ── Folder encryption: paste path dialog ──
@@ -3131,16 +3198,13 @@ func main() {
 			return
 		}
 		kf := keyFileData
-		fd := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
-			if err != nil || r == nil {
+		go func() {
+			p := nativeOpenCrypt(w)
+			if p == "" {
 				return
 			}
-			p := r.URI().Path()
-			r.Close()
-			go decryptFile(p, pw, kf, progress, statusLabel)
-		}, w)
-		fd.SetFilter(storage.NewExtensionFileFilter([]string{".crypt"}))
-		fd.Show()
+			decryptFile(p, pw, kf, progress, statusLabel)
+		}()
 	})
 
 	verifyBtn := widget.NewButton("Verify Integrity Only", func() {
@@ -3150,16 +3214,13 @@ func main() {
 			return
 		}
 		kf := keyFileData
-		fd := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
-			if err != nil || r == nil {
+		go func() {
+			p := nativeOpenCrypt(w)
+			if p == "" {
 				return
 			}
-			p := r.URI().Path()
-			r.Close()
-			go verifyFile(p, pw, kf, progress, statusLabel)
-		}, w)
-		fd.SetFilter(storage.NewExtensionFileFilter([]string{".crypt"}))
-		fd.Show()
+			verifyFile(p, pw, kf, progress, statusLabel)
+		}()
 	})
 
 	decInfo1 := canvas.NewText("Verify checks password + triple integrity without decrypting", colDimText)
@@ -3233,7 +3294,7 @@ func main() {
 	))
 
 	// ════════ ABOUT TAB ════════
-	aboutTitle := canvas.NewText("CRYpT v6.1 — Free Edition", colCyan)
+	aboutTitle := canvas.NewText("CRYpT v6.1 — Free Edition EDITION", colCyan)
 	aboutTitle.TextSize = 14
 	aboutTitle.TextStyle = fyne.TextStyle{Bold: true}
 	aboutTitle.Alignment = fyne.TextAlignCenter
