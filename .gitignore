@@ -1,7 +1,1 @@
-*.exe
-*.syso
-*.dll
-*.so
-*.dylib
-gen_icon*.go
 CRYpT.exe
