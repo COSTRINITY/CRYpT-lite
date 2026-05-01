@@ -335,23 +335,31 @@ var canaryV5 = sha256.Sum256([]byte("COSTRINITY_OBSIDIAN_CANARY_V5_QUINTUPLE_CAS
 // THEME
 // ============================================================================
 
-// Futuristic neon color palette
+// COSTRINITY purple palette. Matches the costrinity.xyz/crypt.html
+// marketing page so the desktop app and the web pitch tell the same
+// visual story:
+//   colCyan      ↔  --purple-lt  #a78bfa  (167,139,250)  primary accent
+//   colCyanDim   ↔  --purple     #7c3aed  (124, 58,237)  mid accent
+//   colCyanDark  ↔  --purple-dk  #5b21b6  ( 91, 33,182)  button bg
+// Variable names kept (not renamed to colPurple*) to minimise the
+// search-and-replace surface and keep this commit reversible. The
+// "Cyan" identifier is now a misnomer; treat as a slot, not a hue.
 var (
-	colBg         = color.RGBA{R: 2, G: 2, B: 8, A: 255}
-	colFg         = color.RGBA{R: 200, G: 215, B: 235, A: 255}
-	colCyan       = color.RGBA{R: 0, G: 220, B: 255, A: 255}
-	colCyanDim    = color.RGBA{R: 0, G: 170, B: 220, A: 255}
-	colCyanDark   = color.RGBA{R: 0, G: 60, B: 90, A: 255}
-	colInputBg    = color.RGBA{R: 10, G: 12, B: 24, A: 255}
-	colOverlay    = color.RGBA{R: 4, G: 4, B: 12, A: 255}
-	colSep        = color.RGBA{R: 0, G: 50, B: 75, A: 255}
-	colDisabled   = color.RGBA{R: 50, G: 60, B: 80, A: 255}
-	colPlaceholder = color.RGBA{R: 80, G: 95, B: 120, A: 255}
-	colSuccess    = color.RGBA{R: 0, G: 255, B: 180, A: 255}
-	colWarn       = color.RGBA{R: 255, G: 170, B: 30, A: 255}
-	colDimText    = color.RGBA{R: 120, G: 140, B: 170, A: 255}
-	colMidText    = color.RGBA{R: 140, G: 160, B: 190, A: 255}
-	colError      = color.RGBA{R: 255, G: 40, B: 60, A: 255}
+	colBg         = color.RGBA{R: 6, G: 6, B: 26, A: 255}    // #06061a, matches web --bg
+	colFg         = color.RGBA{R: 232, G: 234, B: 240, A: 255} // #e8eaf0, matches web --text
+	colCyan       = color.RGBA{R: 167, G: 139, B: 250, A: 255} // #a78bfa  primary accent
+	colCyanDim    = color.RGBA{R: 124, G: 58, B: 237, A: 255}  // #7c3aed  mid accent
+	colCyanDark   = color.RGBA{R: 91, G: 33, B: 182, A: 255}   // #5b21b6  button bg
+	colInputBg    = color.RGBA{R: 13, G: 13, B: 50, A: 255}    // #0d0d32, matches web --card
+	colOverlay    = color.RGBA{R: 9, G: 9, B: 42, A: 255}      // #09092a, matches web --bg2
+	colSep        = color.RGBA{R: 40, G: 25, B: 90, A: 255}    // subtle purple separator
+	colDisabled   = color.RGBA{R: 70, G: 60, B: 95, A: 255}
+	colPlaceholder = color.RGBA{R: 105, G: 95, B: 130, A: 255}
+	colSuccess    = color.RGBA{R: 74, G: 222, B: 128, A: 255}  // #4ade80, matches web --green
+	colWarn       = color.RGBA{R: 244, G: 194, B: 79, A: 255}  // #f4c24f, matches web --gold
+	colDimText    = color.RGBA{R: 130, G: 125, B: 160, A: 255} // muted purple-tinted gray
+	colMidText    = color.RGBA{R: 160, G: 155, B: 185, A: 255}
+	colError      = color.RGBA{R: 248, G: 113, B: 113, A: 255} // #f87171, matches web --red
 )
 
 type costrinityTheme struct{}
@@ -379,13 +387,13 @@ func (t *costrinityTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 	case theme.ColorNameFocus:
 		return colCyan
 	case theme.ColorNameHover:
-		return color.RGBA{R: 0, G: 80, B: 120, A: 255}
+		return color.RGBA{R: 70, G: 35, B: 130, A: 255}   // brighter purple for hover
 	case theme.ColorNameScrollBar:
 		return colCyanDark
 	case theme.ColorNameHeaderBackground:
-		return color.RGBA{R: 4, G: 8, B: 16, A: 255}
+		return color.RGBA{R: 6, G: 6, B: 26, A: 255}      // matches colBg
 	case theme.ColorNameSelection:
-		return color.RGBA{R: 0, G: 60, B: 100, A: 100}
+		return color.RGBA{R: 124, G: 58, B: 237, A: 100}  // purple selection w/ alpha
 	case theme.ColorNameError:
 		return colError
 	case theme.ColorNameSuccess:
