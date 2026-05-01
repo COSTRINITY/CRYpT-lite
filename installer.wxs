@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CRYpT-Setup.msi spec.
+
+  Builds a per-machine installer (still runs without admin via the
+  PerMachineOrPerUser InstallScope on later WiX versions; for WiX 3.14
+  we keep it simple: ProgramFiles64Folder, requires elevation).
+
+  Layout:
+    %ProgramFiles%\CRYpT\
+      CRYpT.exe
+    Start Menu\Programs\CRYpT\CRYpT.lnk    -> CRYpT.exe
+    Add/Remove Programs entry              -> COSTRINITY publisher
+
+  Build (run from the repo root with the Tauri-bundled WiX on PATH):
+    candle.exe installer.wxs -ext WixUIExtension
+    light.exe  installer.wixobj -ext WixUIExtension -o CRYpT-Setup.msi
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="CRYpT"
+    Language="1033"
+    Version="6.2.0"
+    Manufacturer="COSTRINITY"
+    UpgradeCode="F5BA176A-05C3-4A1A-B85A-C90052A4538A">
+
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perMachine"
+      Platform="x64"
+      Description="CRYpT - Quantum-Resistant 14-Cipher Desktop Encryption"
+      Manufacturer="COSTRINITY"
+      Comments="Costrinity Cipher Language v6.2" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of CRYpT is already installed. Uninstall it first if you want to downgrade." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Add/Remove Programs metadata -->
+    <Property Id="ARPPRODUCTICON" Value="CryptIcon.exe" />
+    <Property Id="ARPHELPLINK" Value="https://costrinity.xyz/crypt.html" />
+    <Property Id="ARPURLINFOABOUT" Value="https://costrinity.xyz" />
+    <!-- WixUI_Minimal already sets ARPNOMODIFY/ARPNOREPAIR; do not
+         duplicate them here or candle/light errors with LGHT0091. -->
+
+    <!-- The actual exe gets registered as the icon source so Windows
+         renders the same purple trident in Add/Remove Programs that
+         users see when they launch the app. -->
+    <Icon Id="CryptIcon.exe" SourceFile="CRYpT.exe" />
+
+    <!-- Directory tree: ProgramFiles64\CRYpT and Start Menu shortcut. -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="CRYpT">
+          <Component Id="CryptExe" Guid="E2212004-397E-409A-8B0A-678C70072DFC" Win64="yes">
+            <File Id="CryptExeFile" Source="CRYpT.exe" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="CRYpT">
+          <Component Id="ApplicationShortcut" Guid="D13FBE39-763A-4609-A57D-5ADB0DCD72ED" Win64="yes">
+            <Shortcut
+              Id="ApplicationStartMenuShortcut"
+              Name="CRYpT"
+              Description="Quantum-Resistant 14-Cipher Desktop Encryption"
+              Target="[INSTALLFOLDER]CRYpT.exe"
+              WorkingDirectory="INSTALLFOLDER"
+              Icon="CryptIcon.exe"
+              IconIndex="0" />
+            <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall" />
+            <RegistryValue
+              Root="HKCU"
+              Key="Software\COSTRINITY\CRYpT"
+              Name="installed"
+              Type="integer"
+              Value="1"
+              KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+
+      <!-- Desktop shortcut. Same target as the Start Menu entry; users
+           expect both for a consumer-facing app. WiX requires every
+           Shortcut to live inside a Component, and the component needs
+           a KeyPath - we use an HKCU registry sentinel rather than the
+           shortcut file itself so the shortcut can be safely deleted
+           by the user without breaking subsequent installer repairs. -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="C57DDA7A-B13F-4448-A86A-E6EAC5D992EF" Win64="yes">
+        <Shortcut
+          Id="DesktopShortcutId"
+          Name="CRYpT"
+          Description="Quantum-Resistant 14-Cipher Desktop Encryption"
+          Target="[INSTALLFOLDER]CRYpT.exe"
+          WorkingDirectory="INSTALLFOLDER"
+          Icon="CryptIcon.exe"
+          IconIndex="0" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\COSTRINITY\CRYpT"
+          Name="desktop"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="ProductFeature" Title="CRYpT" Level="1">
+      <ComponentRef Id="CryptExe" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Minimal UI: license + install path + finish. WixUI_Minimal is
+         the smallest viable wizard; no need for component selection
+         since there's exactly one feature. -->
+    <UIRef Id="WixUI_Minimal" />
+  </Product>
+</Wix>
